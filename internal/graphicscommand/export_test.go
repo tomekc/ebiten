@@ -27,5 +27,5 @@ func (i *Image) BufferedWritePixelsArgsForTesting() []WritePixelsCommandArgs {
 }
 
 func PrependPreservedUniforms(uniforms []uint32, shader *Shader, dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle) []uint32 {
-	return prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions)
+	return prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions, nil)
 }

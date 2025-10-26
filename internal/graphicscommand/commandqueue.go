@@ -106,7 +106,7 @@ func mustUseDifferentVertexBuffer(nextNumVertexFloats int) bool {
 }
 
 // EnqueueDrawTrianglesCommand enqueues a drawing-image command.
-func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule) {
+func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, projectionMatrix *[16]float32) {
 	if len(vertices) > maxVertexFloatCount {
 		panic(fmt.Sprintf("graphicscommand: len(vertices) must equal to or less than %d but was %d", maxVertexFloatCount, len(vertices)))
 	}
@@ -126,7 +126,7 @@ func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.Sh
 	// prependPreservedUniforms not only prepends values to the given slice but also creates a new slice.
 	// Allocating a new slice is necessary to make EnqueueDrawTrianglesCommand safe so far.
 	// TODO: This might cause a performance issue (#2601).
-	uniforms = q.prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions)
+	uniforms = q.prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions, projectionMatrix)
 
 	// Remove unused uniform variables so that more commands can be merged.
 	shader.ir.FilterUniformVariables(uniforms)
@@ -345,14 +345,14 @@ func imageRectangleToRectangleF32(r image.Rectangle) rectangleF32 {
 	}
 }
 
-func (q *commandQueue) prependPreservedUniforms(uniforms []uint32, shader *Shader, dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle) []uint32 {
+func (q *commandQueue) prependPreservedUniforms(uniforms []uint32, shader *Shader, dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, projectionMatrix *[16]float32) []uint32 {
 	origUniforms := uniforms
 	uniforms = q.uint32sBuffer.alloc(len(origUniforms) + graphics.PreservedUniformDwordCount)
 	copy(uniforms[graphics.PreservedUniformDwordCount:], origUniforms)
-	return prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions)
+	return prependPreservedUniforms(uniforms, shader, dst, srcs, dstRegion, srcRegions, projectionMatrix)
 }
 
-func prependPreservedUniforms(uniforms []uint32, shader *Shader, dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle) []uint32 {
+func prependPreservedUniforms(uniforms []uint32, shader *Shader, dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, projectionMatrix *[16]float32) []uint32 {
 	// Set the destination texture size.
 	// Hard-code indices for BCE optimization.
 	_ = uniforms[graphics.PreservedUniformDwordCount-1]
@@ -448,22 +448,28 @@ func prependPreservedUniforms(uniforms []uint32, shader *Shader, dst *Image, src
 	uniforms[29] = math.Float32bits(srs[3].height)
 
 	// Set the projection matrix.
-	uniforms[30] = math.Float32bits(2 / float32(dw))
-	uniforms[31] = 0
-	uniforms[32] = 0
-	uniforms[33] = 0
-	uniforms[34] = 0
-	uniforms[35] = math.Float32bits(2 / float32(dh))
-	uniforms[36] = 0
-	uniforms[37] = 0
-	uniforms[38] = 0
-	uniforms[39] = 0
-	uniforms[40] = math.Float32bits(1)
-	uniforms[41] = 0
-	uniforms[42] = math.Float32bits(-1)
-	uniforms[43] = math.Float32bits(-1)
-	uniforms[44] = 0
-	uniforms[45] = math.Float32bits(1)
+	if projectionMatrix != nil {
+		for idx := 0; idx < 16; idx++ {
+			uniforms[30+idx] = math.Float32bits((*projectionMatrix)[idx])
+		}
+	} else {
+		uniforms[30] = math.Float32bits(2 / float32(dw))
+		uniforms[31] = 0
+		uniforms[32] = 0
+		uniforms[33] = 0
+		uniforms[34] = 0
+		uniforms[35] = math.Float32bits(2 / float32(dh))
+		uniforms[36] = 0
+		uniforms[37] = 0
+		uniforms[38] = 0
+		uniforms[39] = 0
+		uniforms[40] = math.Float32bits(1)
+		uniforms[41] = 0
+		uniforms[42] = math.Float32bits(-1)
+		uniforms[43] = math.Float32bits(-1)
+		uniforms[44] = 0
+		uniforms[45] = math.Float32bits(1)
+	}
 
 	return uniforms
 }
@@ -522,11 +528,11 @@ func (c *commandQueueManager) putCommandQueue(commandQueue *commandQueue) {
 	c.pool.put(commandQueue)
 }
 
-func (c *commandQueueManager) enqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule) {
+func (c *commandQueueManager) enqueueDrawTrianglesCommand(dst *Image, srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, projectionMatrix *[16]float32) {
 	if c.current == nil {
 		c.current, _ = c.pool.get()
 	}
-	c.current.EnqueueDrawTrianglesCommand(dst, srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule)
+	c.current.EnqueueDrawTrianglesCommand(dst, srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, projectionMatrix)
 }
 
 func (c *commandQueueManager) flush(graphicsDriver graphicsdriver.Graphics, endFrame bool) error {

@@ -301,7 +301,7 @@ func (i *Image) ensureIsolatedFromSource(backends []*backend) {
 	dr := image.Rect(0, 0, i.width, i.height)
 	sr := image.Rect(0, 0, i.width, i.height)
 
-	newI.drawTriangles([graphics.ShaderSrcImageCount]*Image{i}, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, restorable.HintOverwriteDstRegion)
+	newI.drawTriangles([graphics.ShaderSrcImageCount]*Image{i}, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, restorable.HintOverwriteDstRegion, nil)
 	newI.moveTo(i)
 }
 
@@ -332,7 +332,7 @@ func (i *Image) putOnSourceBackend() {
 	is := graphics.QuadIndices()
 	dr := image.Rect(0, 0, i.width, i.height)
 	sr := image.Rect(0, 0, i.width, i.height)
-	newI.drawTriangles([graphics.ShaderSrcImageCount]*Image{i}, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, restorable.HintOverwriteDstRegion)
+	newI.drawTriangles([graphics.ShaderSrcImageCount]*Image{i}, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, restorable.HintOverwriteDstRegion, nil)
 
 	newI.moveTo(i)
 	i.usedAsSourceCount = 0
@@ -364,7 +364,11 @@ func (i *imageImpl) regionWithPadding() image.Rectangle {
 //	5: Color G
 //	6: Color B
 //	7: Color Y
-func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint restorable.Hint) {
+func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint restorable.Hint, projectionMatrices ...*[16]float32) {
+	var projectionMatrix *[16]float32
+	if len(projectionMatrices) > 0 {
+		projectionMatrix = projectionMatrices[0]
+	}
 	backendsM.Lock()
 	defer backendsM.Unlock()
 
@@ -377,15 +381,15 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 		copy(us, uniforms)
 
 		appendDeferred(func() {
-			i.drawTriangles(srcs, vs, is, blend, dstRegion, srcRegions, shader, us, fillRule, hint)
+			i.drawTriangles(srcs, vs, is, blend, dstRegion, srcRegions, shader, us, fillRule, hint, projectionMatrix)
 		})
 		return
 	}
 
-	i.drawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, hint)
+	i.drawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, hint, projectionMatrix)
 }
 
-func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint restorable.Hint) {
+func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint restorable.Hint, projectionMatrix *[16]float32) {
 	backends := make([]*backend, 0, len(srcs))
 	for _, src := range srcs {
 		if src == nil {
@@ -463,7 +467,7 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 		}
 	}
 
-	i.backend.restorable.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms, fillRule, hint)
+	i.backend.restorable.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms, fillRule, hint, projectionMatrix)
 }
 
 // WritePixels replaces the pixels on the image.

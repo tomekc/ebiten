@@ -340,7 +340,7 @@ func (i *Image) DrawImage(img *Image, options *DrawImageOptions) {
 	if !skipMipmap {
 		skipMipmap = canSkipMipmap(det, filter)
 	}
-	i.image.DrawTriangles(srcs, vs, is, blend, dr, [graphics.ShaderSrcImageCount]image.Rectangle{img.adjustedBounds()}, shader.shader, i.tmpUniforms, graphicsdriver.FillRuleFillAll, skipMipmap, false, hint)
+	i.image.DrawTriangles(srcs, vs, is, blend, dr, [graphics.ShaderSrcImageCount]image.Rectangle{img.adjustedBounds()}, shader.shader, i.tmpUniforms, graphicsdriver.FillRuleFillAll, skipMipmap, false, hint, nil)
 }
 
 // overwritesDstRegion reports whether the given parameters overwrite the destination region completely.
@@ -715,7 +715,7 @@ func (i *Image) DrawTriangles32(vertices []Vertex, indices []uint32, img *Image,
 	if !skipMipmap {
 		skipMipmap = filter != builtinshader.FilterLinear
 	}
-	i.image.DrawTriangles(srcs, vs, indices, blend, i.adjustedBounds(), [graphics.ShaderSrcImageCount]image.Rectangle{img.adjustedBounds()}, shader.shader, i.tmpUniforms, graphicsdriver.FillRule(options.FillRule), skipMipmap, options.AntiAlias, restorable.HintNone)
+	i.image.DrawTriangles(srcs, vs, indices, blend, i.adjustedBounds(), [graphics.ShaderSrcImageCount]image.Rectangle{img.adjustedBounds()}, shader.shader, i.tmpUniforms, graphicsdriver.FillRule(options.FillRule), skipMipmap, options.AntiAlias, restorable.HintNone, nil)
 }
 
 // DrawTrianglesShaderOptions represents options for DrawTrianglesShader.
@@ -767,6 +767,14 @@ type DrawTrianglesShaderOptions struct {
 	//
 	// Deprecated: as of v2.9. Use [github.com/hajimehoshi/ebiten/v2/vector.FillPath] instead.
 	AntiAlias bool
+
+	// RawDstCoordinates skips Ebiten's sub-pixel adjustment on destination coordinates.
+	// Enable this when providing 3D-transformed positions through a custom vertex shader.
+	RawDstCoordinates bool
+
+	// ProjectionMatrix overrides the default orthographic projection.
+	// The matrix is in column-major order and is applied before the vertex shader runs.
+	ProjectionMatrix *[16]float32
 }
 
 // Check the number of images.
@@ -881,6 +889,8 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 		options = &DrawTrianglesShaderOptions{}
 	}
 
+	rawDst := options.RawDstCoordinates
+
 	var blend graphicsdriver.Blend
 	if options.CompositeMode == CompositeModeCustom {
 		blend = options.Blend.internalBlend()
@@ -895,7 +905,10 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 	for i := range vertices {
 		// Create a temporary slice to reduce boundary checks.
 		vs := vs[i*graphics.VertexFloatCount : i*graphics.VertexFloatCount+12]
-		dx, dy := dst.adjustPositionF32(vertices[i].DstX, vertices[i].DstY)
+		dx, dy := vertices[i].DstX, vertices[i].DstY
+		if !rawDst {
+			dx, dy = dst.adjustPositionF32(dx, dy)
+		}
 		vs[0] = dx
 		vs[1] = dy
 		sx, sy := vertices[i].SrcX, vertices[i].SrcY
@@ -947,7 +960,7 @@ func (i *Image) DrawTrianglesShader32(vertices []Vertex, indices []uint32, shade
 	i.tmpUniforms = i.tmpUniforms[:0]
 	i.tmpUniforms = shader.appendUniforms(i.tmpUniforms, options.Uniforms)
 
-	i.image.DrawTriangles(imgs, vs, indices, blend, i.adjustedBounds(), srcRegions, shader.shader, i.tmpUniforms, graphicsdriver.FillRule(options.FillRule), true, options.AntiAlias, restorable.HintNone)
+	i.image.DrawTriangles(imgs, vs, indices, blend, i.adjustedBounds(), srcRegions, shader.shader, i.tmpUniforms, graphicsdriver.FillRule(options.FillRule), true, options.AntiAlias, restorable.HintNone, options.ProjectionMatrix)
 }
 
 // DrawRectShaderOptions represents options for DrawRectShader.
@@ -1110,7 +1123,7 @@ func (i *Image) DrawRectShader(width, height int, shader *Shader, options *DrawR
 		hint = restorable.HintOverwriteDstRegion
 	}
 
-	i.image.DrawTriangles(imgs, vs, is, blend, dr, srcRegions, shader.shader, i.tmpUniforms, graphicsdriver.FillRuleFillAll, true, false, hint)
+	i.image.DrawTriangles(imgs, vs, is, blend, dr, srcRegions, shader.shader, i.tmpUniforms, graphicsdriver.FillRuleFillAll, true, false, hint, nil)
 }
 
 // SubImage returns an image representing the portion of the image p visible through r.

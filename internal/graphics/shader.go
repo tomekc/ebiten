@@ -17,6 +17,8 @@ package graphics
 import (
 	"bytes"
 	"fmt"
+	"go/scanner"
+	"go/token"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/shader"
 	"github.com/hajimehoshi/ebiten/v2/internal/shaderir"
@@ -154,11 +156,37 @@ func imageSrc%[1]dAt(pos vec2) vec4 {
 	shaderSuffix += `
 var __projectionMatrix mat4
 
-func __vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
+`
+	return shaderSuffix, nil
+}
+
+const defaultVertexFunc = `
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
 	return __projectionMatrix * vec4(dstPos, 0, 1), srcPos, color, custom
 }
 `
-	return shaderSuffix, nil
+
+func hasVertexFunc(src []byte) bool {
+	if len(src) == 0 {
+		return false
+	}
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(src))
+	var s scanner.Scanner
+	s.Init(file, src, nil, scanner.ScanComments)
+	for {
+		_, tok, _ := s.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok == token.FUNC {
+			_, nextTok, nextLit := s.Scan()
+			if nextTok == token.IDENT && nextLit == "Vertex" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func completeShaderSource(fragmentSrc []byte) ([]byte, error) {
@@ -174,6 +202,9 @@ func completeShaderSource(fragmentSrc []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	buf.Write(fragmentSrc)
 	buf.WriteString(suffix)
+	if !hasVertexFunc(fragmentSrc) {
+		buf.WriteString(defaultVertexFunc)
+	}
 
 	return buf.Bytes(), nil
 }
@@ -185,7 +216,7 @@ func CompileShader(fragmentSrc []byte) (*shaderir.Program, error) {
 	}
 
 	const (
-		vert = "__vertex"
+		vert = "Vertex"
 		frag = "Fragment"
 	)
 	ir, err := shader.Compile(src, vert, frag, ShaderSrcImageCount)

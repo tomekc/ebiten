@@ -196,7 +196,11 @@ func (i *Image) WritePixels(pix []byte, region image.Rectangle) {
 // DrawTriangles draws the src image with the given vertices.
 //
 // Copying vertices and indices is the caller's responsibility.
-func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint restorable.Hint) {
+func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *atlas.Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint restorable.Hint, projectionMatrices ...*[16]float32) {
+	var projectionMatrix *[16]float32
+	if len(projectionMatrices) > 0 {
+		projectionMatrix = projectionMatrices[0]
+	}
 	for _, src := range srcs {
 		if i == src {
 			panic("buffered: Image.DrawTriangles: source images must be different from the receiver")
@@ -218,7 +222,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 		imgs[i] = img.img
 	}
 
-	i.img.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, hint)
+	i.img.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, hint, projectionMatrix)
 
 	// After rendering, the pixel cache is no longer valid.
 	i.pixels = nil
@@ -312,7 +316,7 @@ func (i *Image) syncPixelsIfNeeded() {
 	dr := image.Rect(0, 0, i.width, i.height)
 	sr := image.Rect(0, 0, whiteImage.width, whiteImage.height)
 	blend := graphicsdriver.BlendCopy
-	i.img.DrawTriangles(srcs, vs, is, blend, dr, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, atlas.NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, restorable.HintNone)
+	i.img.DrawTriangles(srcs, vs, is, blend, dr, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, atlas.NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, restorable.HintNone, nil)
 
 	clear(i.dotsBuffer)
 }

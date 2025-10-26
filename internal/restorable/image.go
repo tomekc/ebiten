@@ -80,15 +80,17 @@ func (p *Pixels) Dispose() {
 
 // drawTrianglesHistoryItem is an item for history of draw-image commands.
 type drawTrianglesHistoryItem struct {
-	srcImages  [graphics.ShaderSrcImageCount]*Image
-	vertices   []float32
-	indices    []uint32
-	blend      graphicsdriver.Blend
-	dstRegion  image.Rectangle
-	srcRegions [graphics.ShaderSrcImageCount]image.Rectangle
-	shader     *Shader
-	uniforms   []uint32
-	fillRule   graphicsdriver.FillRule
+	srcImages             [graphics.ShaderSrcImageCount]*Image
+	vertices              []float32
+	indices               []uint32
+	blend                 graphicsdriver.Blend
+	dstRegion             image.Rectangle
+	srcRegions            [graphics.ShaderSrcImageCount]image.Rectangle
+	shader                *Shader
+	uniforms              []uint32
+	fillRule              graphicsdriver.FillRule
+	hasProjectionOverride bool
+	projectionOverride    [16]float32
 }
 
 type ImageType int
@@ -201,7 +203,7 @@ func (i *Image) Extend(width, height int) *Image {
 	graphics.QuadVerticesFromDstAndSrc(vs, 0, 0, float32(sw), float32(sh), 0, 0, float32(sw), float32(sh), 1, 1, 1, 1)
 	is := graphics.QuadIndices()
 	dr := image.Rect(0, 0, sw, sh)
-	newImg.DrawTriangles(srcs, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, HintOverwriteDstRegion)
+	newImg.DrawTriangles(srcs, vs, is, graphicsdriver.BlendCopy, dr, [graphics.ShaderSrcImageCount]image.Rectangle{}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, HintOverwriteDstRegion, nil)
 	i.Dispose()
 
 	return newImg
@@ -211,7 +213,7 @@ func clearImage(i *graphicscommand.Image, region image.Rectangle) {
 	vs := make([]float32, 4*graphics.VertexFloatCount)
 	graphics.QuadVerticesFromDstAndSrc(vs, float32(region.Min.X), float32(region.Min.Y), float32(region.Max.X), float32(region.Max.Y), 0, 0, 0, 0, 0, 0, 0, 0)
 	is := graphics.QuadIndices()
-	i.DrawTriangles([graphics.ShaderSrcImageCount]*graphicscommand.Image{}, vs, is, graphicsdriver.BlendClear, region, [graphics.ShaderSrcImageCount]image.Rectangle{}, clearShader.shader, nil, graphicsdriver.FillRuleFillAll)
+	i.DrawTriangles([graphics.ShaderSrcImageCount]*graphicscommand.Image{}, vs, is, graphicsdriver.BlendClear, region, [graphics.ShaderSrcImageCount]image.Rectangle{}, clearShader.shader, nil, graphicsdriver.FillRuleFillAll, nil)
 }
 
 // BasePixelsForTesting returns the image's basePixels for testing.
@@ -332,7 +334,11 @@ func (i *Image) WritePixels(pixels *graphics.ManagedBytes, region image.Rectangl
 //	5: Color G
 //	6: Color B
 //	7: Color Y
-func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint Hint) {
+func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint Hint, projectionMatrices ...*[16]float32) {
+	var projectionMatrix *[16]float32
+	if len(projectionMatrices) > 0 {
+		projectionMatrix = projectionMatrices[0]
+	}
 	if len(vertices) == 0 {
 		return
 	}
@@ -347,7 +353,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 			srcImages[i] = src.image
 		}
 		i.makeStale(dstRegion)
-		i.image.DrawTriangles(srcImages, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, fillRule)
+		i.image.DrawTriangles(srcImages, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, fillRule, projectionMatrix)
 		return
 	}
 
@@ -388,10 +394,10 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	}
 
 	if !i.stale {
-		i.appendDrawTrianglesHistory(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, hint)
+		i.appendDrawTrianglesHistory(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, hint, projectionMatrix)
 	}
 
-	i.image.DrawTriangles(srcImages, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, fillRule)
+	i.image.DrawTriangles(srcImages, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, fillRule, projectionMatrix)
 }
 
 func (i *Image) areStaleRegionsIncludedIn(r image.Rectangle) bool {
@@ -426,7 +432,7 @@ func (i *Image) removeDrawTrianglesHistoryItems(region image.Rectangle) {
 }
 
 // appendDrawTrianglesHistory appends a draw-image history item to the image.
-func (i *Image) appendDrawTrianglesHistory(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint Hint) {
+func (i *Image) appendDrawTrianglesHistory(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, hint Hint, projectionMatrix *[16]float32) {
 	if i.stale || !i.needsRestoration() {
 		panic("restorable: an image must not be stale or need restoration at appendDrawTrianglesHistory")
 	}
@@ -467,6 +473,12 @@ func (i *Image) appendDrawTrianglesHistory(srcs [graphics.ShaderSrcImageCount]*I
 		shader:     shader,
 		uniforms:   us,
 		fillRule:   fillRule,
+	}
+	if projectionMatrix != nil {
+		item.hasProjectionOverride = true
+		for idx := range item.projectionOverride {
+			item.projectionOverride[idx] = (*projectionMatrix)[idx]
+		}
 	}
 	i.drawTrianglesHistory = append(i.drawTrianglesHistory, item)
 }
@@ -710,7 +722,11 @@ func (i *Image) restore(graphicsDriver graphicsdriver.Graphics) error {
 			}
 			imgs[i] = img.image
 		}
-		gimg.DrawTriangles(imgs, c.vertices, c.indices, c.blend, c.dstRegion, c.srcRegions, c.shader.shader, c.uniforms, c.fillRule)
+		var projection *[16]float32
+		if c.hasProjectionOverride {
+			projection = &c.projectionOverride
+		}
+		gimg.DrawTriangles(imgs, c.vertices, c.indices, c.blend, c.dstRegion, c.srcRegions, c.shader.shader, c.uniforms, c.fillRule, projection)
 	}
 
 	// In order to clear the draw-triangles history, read pixels from GPU.

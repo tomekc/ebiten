@@ -78,7 +78,11 @@ func (i *Image) Deallocate() {
 	i.mipmap.Deallocate()
 }
 
-func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, canSkipMipmap bool, antialias bool, hint restorable.Hint) {
+func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, canSkipMipmap bool, antialias bool, hint restorable.Hint, projectionMatrices ...*[16]float32) {
+	var projectionMatrix *[16]float32
+	if len(projectionMatrices) > 0 {
+		projectionMatrix = projectionMatrices[0]
+	}
 	if i.modifyCallback != nil {
 		i.modifyCallback()
 	}
@@ -99,7 +103,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 			i.bigOffscreenBuffer = i.ui.newBigOffscreenImage(i, imageType)
 		}
 
-		i.bigOffscreenBuffer.drawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, canSkipMipmap)
+		i.bigOffscreenBuffer.drawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, canSkipMipmap, projectionMatrix)
 		return
 	}
 
@@ -114,7 +118,7 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 		srcMipmaps[i] = src.mipmap
 	}
 
-	i.mipmap.DrawTriangles(srcMipmaps, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, fillRule, canSkipMipmap, hint)
+	i.mipmap.DrawTriangles(srcMipmaps, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, fillRule, canSkipMipmap, hint, projectionMatrix)
 }
 
 func (i *Image) WritePixels(pix []byte, region image.Rectangle) {
@@ -185,7 +189,7 @@ func (i *Image) Fill(r, g, b, a float32, region image.Rectangle) {
 	}
 	sr := image.Rect(0, 0, i.ui.whiteImage.width, i.ui.whiteImage.height)
 	// i.lastBlend is updated in DrawTriangles.
-	i.DrawTriangles(srcs, i.tmpVerticesForFill, is, blend, region, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, true, false, restorable.HintOverwriteDstRegion)
+	i.DrawTriangles(srcs, i.tmpVerticesForFill, is, blend, region, [graphics.ShaderSrcImageCount]image.Rectangle{sr}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, true, false, restorable.HintOverwriteDstRegion, nil)
 }
 
 type bigOffscreenImage struct {
@@ -219,7 +223,11 @@ func (i *bigOffscreenImage) deallocate() {
 	i.dirty = false
 }
 
-func (i *bigOffscreenImage) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, canSkipMipmap bool) {
+func (i *bigOffscreenImage) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertices []float32, indices []uint32, blend graphicsdriver.Blend, dstRegion image.Rectangle, srcRegions [graphics.ShaderSrcImageCount]image.Rectangle, shader *Shader, uniforms []uint32, fillRule graphicsdriver.FillRule, canSkipMipmap bool, projectionMatrices ...*[16]float32) {
+	var projectionMatrix *[16]float32
+	if len(projectionMatrices) > 0 {
+		projectionMatrix = projectionMatrices[0]
+	}
 	if i.blend != blend {
 		i.flush()
 	}
@@ -255,7 +263,7 @@ func (i *bigOffscreenImage) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Im
 		is := graphics.QuadIndices()
 		dstRegion := image.Rect(0, 0, i.region.Dx()*bigOffscreenScale, i.region.Dy()*bigOffscreenScale)
 		srcRegion := i.region
-		i.image.DrawTriangles(srcs, i.tmpVerticesForCopying, is, graphicsdriver.BlendCopy, dstRegion, [graphics.ShaderSrcImageCount]image.Rectangle{srcRegion}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, true, false, restorable.HintOverwriteDstRegion)
+		i.image.DrawTriangles(srcs, i.tmpVerticesForCopying, is, graphicsdriver.BlendCopy, dstRegion, [graphics.ShaderSrcImageCount]image.Rectangle{srcRegion}, NearestFilterShader, nil, graphicsdriver.FillRuleFillAll, true, false, restorable.HintOverwriteDstRegion, projectionMatrix)
 	}
 
 	for idx := 0; idx < len(vertices); idx += graphics.VertexFloatCount {
@@ -271,7 +279,7 @@ func (i *bigOffscreenImage) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Im
 	dstRegion.Max.X *= bigOffscreenScale
 	dstRegion.Max.Y *= bigOffscreenScale
 
-	i.image.DrawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, canSkipMipmap, false, restorable.HintNone)
+	i.image.DrawTriangles(srcs, vertices, indices, blend, dstRegion, srcRegions, shader, uniforms, fillRule, canSkipMipmap, false, restorable.HintNone, projectionMatrix)
 	i.dirty = true
 }
 
@@ -306,7 +314,7 @@ func (i *bigOffscreenImage) flush() {
 		blend = graphicsdriver.BlendCopy
 		hint = restorable.HintOverwriteDstRegion
 	}
-	i.orig.DrawTriangles(srcs, i.tmpVerticesForFlushing, is, blend, dstRegion, [graphics.ShaderSrcImageCount]image.Rectangle{srcRegion}, LinearFilterShader, nil, graphicsdriver.FillRuleFillAll, true, false, hint)
+	i.orig.DrawTriangles(srcs, i.tmpVerticesForFlushing, is, blend, dstRegion, [graphics.ShaderSrcImageCount]image.Rectangle{srcRegion}, LinearFilterShader, nil, graphicsdriver.FillRuleFillAll, true, false, hint, nil)
 
 	i.image.clear()
 	i.dirty = false
