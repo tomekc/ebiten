@@ -221,11 +221,17 @@ func (g *Game) Update() error {
 func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.NRGBA{R: 12, G: 18, B: 31, A: 255})
 
+	g.Draw3DMesh(screen)
+
+	ebitenutil.DebugPrint(screen, "Mesh example: rotating flat-shaded cube")
+}
+
+func (g *Game) Draw3DMesh(screen *ebiten.Image) {
 	width, height := screen.Size()
 	aspect := float32(width) / float32(height)
 
 	proj := perspective(float32(math.Pi)/3, aspect, 0.1, 10)
-	view := lookAt(vec3{0, 0, 4}, vec3{0, 0, 0}, vec3{0, 1, 0})
+	view := lookAt(vec3{0, 0, 10}, vec3{0, 0, 0}, vec3{0, 1, 0})
 	rotY := rotate(g.angle, vec3{0, 1, 0})
 	rotX := rotate(g.angle*0.5, vec3{1, 0, 0})
 	model := mulMat4(rotY, rotX)
@@ -258,8 +264,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	//}
 
 	screen.DrawTrianglesShader(g.vertices, g.indices, g.shader, opts)
-
-	ebitenutil.DebugPrint(screen, "Mesh example: rotating flat-shaded cube")
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
