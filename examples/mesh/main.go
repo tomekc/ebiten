@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"image/color"
 	"log"
 	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	res "github.com/hajimehoshi/ebiten/v2/examples/resources/images/shader"
 )
 
 type vec3 struct {
@@ -60,14 +62,20 @@ func (m mat4) mulVec4(v vec4) vec4 {
 }
 
 func perspective(fovY, aspect, near, far float32) mat4 {
-	f := float32(1.0 / math.Tan(float64(fovY)/2.0))
-	var m mat4
-	m.set(0, 0, f/aspect)
-	m.set(1, 1, f)
-	m.set(2, 2, (far+near)/(near-far))
-	m.set(2, 3, (2*far*near)/(near-far))
-	m.set(3, 2, -1)
-	return m
+
+	// fovy = (fovy * math.Pi) / 180.0 // convert from degrees to radians
+	nmf, f := near-far, float32(1./math.Tan(float64(fovY)/2.0))
+
+	return mat4{float32(f / aspect), 0, 0, 0, 0, float32(f), 0, 0, 0, 0, float32((near + far) / nmf), -1, 0, 0, float32((2. * far * near) / nmf), 0}
+
+	//f := float32(1.0 / math.Tan(float64(fovY)/2.0))
+	//var m mat4
+	//m.set(0, 0, f/aspect)
+	//m.set(1, 1, f)
+	//m.set(2, 2, (far+near)/(near-far))
+	//m.set(2, 3, (2*far*near)/(near-far))
+	//m.set(3, 2, -1)
+	//return m
 }
 
 func normalize(v vec3) vec3 {
@@ -143,11 +151,22 @@ func (m mat4) toSlice() []float32 {
 	return out
 }
 
+func (m mat4) transpose() mat4 {
+	var t mat4
+	for row := 0; row < 4; row++ {
+		for col := 0; col < 4; col++ {
+			t.set(row, col, m.at(col, row))
+		}
+	}
+	return t
+}
+
 type Game struct {
 	shader   *ebiten.Shader
 	vertices []ebiten.Vertex
 	indices  []uint16
 	angle    float32
+	texture  *ebiten.Image
 }
 
 func NewGame() (*Game, error) {
@@ -156,28 +175,44 @@ func NewGame() (*Game, error) {
 		return nil, err
 	}
 
-	vertices, indices := buildCube()
+	tex, err := loadTexture()
+	if err != nil {
+		return nil, err
+	}
+
+	tw, th := tex.Bounds().Dx(), tex.Bounds().Dy()
+	vertices, indices := buildCube(float32(tw), float32(th))
 
 	return &Game{
 		shader:   shader,
 		vertices: vertices,
 		indices:  indices,
+		texture:  tex,
 	}, nil
 }
 
-func buildCube() ([]ebiten.Vertex, []uint16) {
+func loadTexture() (*ebiten.Image, error) {
+	img, _, err := ebitenutil.NewImageFromReader(bytes.NewReader(res.GopherBg_png))
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+func buildCube(texWidth, texHeight float32) ([]ebiten.Vertex, []uint16) {
 	type face struct {
 		normal vec3
 		verts  [4]vec3
+		uvs    [4][2]float32
 	}
 
 	faces := []face{
-		{normal: vec3{0, 0, 1}, verts: [4]vec3{{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}}},
-		{normal: vec3{0, 0, -1}, verts: [4]vec3{{1, -1, -1}, {-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}}},
-		{normal: vec3{0, 1, 0}, verts: [4]vec3{{-1, 1, 1}, {1, 1, 1}, {1, 1, -1}, {-1, 1, -1}}},
-		{normal: vec3{0, -1, 0}, verts: [4]vec3{{-1, -1, -1}, {1, -1, -1}, {1, -1, 1}, {-1, -1, 1}}},
-		{normal: vec3{1, 0, 0}, verts: [4]vec3{{1, -1, 1}, {1, -1, -1}, {1, 1, -1}, {1, 1, 1}}},
-		{normal: vec3{-1, 0, 0}, verts: [4]vec3{{-1, -1, -1}, {-1, -1, 1}, {-1, 1, 1}, {-1, 1, -1}}},
+		{normal: vec3{0, 0, 1}, verts: [4]vec3{{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}}, uvs: [4][2]float32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
+		{normal: vec3{0, 0, -1}, verts: [4]vec3{{1, -1, -1}, {-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}}, uvs: [4][2]float32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
+		{normal: vec3{0, 1, 0}, verts: [4]vec3{{-1, 1, 1}, {1, 1, 1}, {1, 1, -1}, {-1, 1, -1}}, uvs: [4][2]float32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
+		{normal: vec3{0, -1, 0}, verts: [4]vec3{{-1, -1, -1}, {1, -1, -1}, {1, -1, 1}, {-1, -1, 1}}, uvs: [4][2]float32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
+		{normal: vec3{1, 0, 0}, verts: [4]vec3{{1, -1, 1}, {1, -1, -1}, {1, 1, -1}, {1, 1, 1}}, uvs: [4][2]float32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
+		{normal: vec3{-1, 0, 0}, verts: [4]vec3{{-1, -1, -1}, {-1, -1, 1}, {-1, 1, 1}, {-1, 1, -1}}, uvs: [4][2]float32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
 	}
 
 	var vertices []ebiten.Vertex
@@ -187,11 +222,14 @@ func buildCube() ([]ebiten.Vertex, []uint16) {
 		triOrder := [6]int{0, 2, 1, 0, 3, 2}
 		for _, idx := range triOrder {
 			p := quad[idx]
-			v := ebiten.Vertex{
+			uv := f.uvs[idx]
+			uCoord := uv[0] * texWidth
+			vCoord := uv[1] * texHeight
+			vertex := ebiten.Vertex{
 				DstX:    0,
 				DstY:    0,
-				SrcX:    0,
-				SrcY:    0,
+				SrcX:    uCoord,
+				SrcY:    vCoord,
 				ColorR:  normal.x,
 				ColorG:  normal.y,
 				ColorB:  normal.z,
@@ -201,7 +239,7 @@ func buildCube() ([]ebiten.Vertex, []uint16) {
 				Custom2: p.z,
 				Custom3: 1,
 			}
-			vertices = append(vertices, v)
+			vertices = append(vertices, vertex)
 		}
 	}
 
@@ -233,8 +271,9 @@ func (g *Game) Draw3DMesh(screen *ebiten.Image) {
 	proj := perspective(float32(math.Pi)/3, aspect, 0.1, 10)
 	view := lookAt(vec3{0, 0, 10}, vec3{0, 0, 0}, vec3{0, 1, 0})
 	rotY := rotate(g.angle, vec3{0, 1, 0})
-	rotX := rotate(g.angle*0.5, vec3{1, 0, 0})
-	model := mulMat4(rotY, rotX)
+	model := rotY
+	//rotX := rotate(g.angle*0.5, vec3{1, 0, 0})
+	//model := mulMat4(rotY, rotX)
 	//model := identity()
 	mvp := mulMat4(proj, mulMat4(view, model))
 
@@ -242,12 +281,14 @@ func (g *Game) Draw3DMesh(screen *ebiten.Image) {
 
 	uniforms := map[string]interface{}{
 		"MVP":      mvp.toSlice(),
+		"NormalM":  rotY.transpose().toSlice(),
 		"LightDir": []float32{light.x, light.y, light.z},
 	}
 
 	opts := &ebiten.DrawTrianglesShaderOptions{
 		Uniforms:          uniforms,
 		RawDstCoordinates: true,
+		Images:            [4]*ebiten.Image{g.texture},
 	}
 
 	//log.Printf("Vertices: %d Indices: %d", len(g.vertices), len(g.indices))
@@ -287,9 +328,10 @@ func Fragment(dstPos vec4, srcPos vec2, normal vec4, custom vec4) vec4 {
     n := normalize(normal.xyz)
     l := normalize(LightDir)
     diff := max(dot(n, l), 0)
-    base := vec3(0.8, 0.55, 0.35)
+    texel := imageSrc0At(srcPos)
+    base := texel.rgb
     shaded := base * (0.2 + 0.8*diff)
-    return vec4(shaded, 1)
+    return vec4(shaded, texel.a)
 }
 `
 
