@@ -34,10 +34,9 @@ func Fragment(dstPos vec4, srcPos vec2, normal vec4, custom vec4) vec4 {
 // Use Begin to obtain the render target, draw 3D content into it, then call End
 // to composite the result back to another image (typically the screen).
 type Renderer3D struct {
-	target *Image
-	size   image.Point
-	shader *Shader
-	Renderer3DOptions
+	target               *Image
+	size                 image.Point
+	shader               *Shader
 	OffScreenBlitOptions *DrawImageOptions
 }
 
@@ -49,10 +48,6 @@ func NewRenderer3D() *Renderer3D {
 	}
 	return &Renderer3D{
 		shader: shader,
-		Renderer3DOptions: Renderer3DOptions{
-			Clear:      true,
-			ClearColor: color.RGBA{0, 0, 0, 255},
-		},
 	}
 }
 
@@ -66,11 +61,15 @@ func (r *Renderer3D) resize(width, height int) {
 		panic("ebiten: Renderer3D size must be positive")
 	}
 
-	r.size = image.Pt(width, height)
-	if r.target != nil {
-		r.target.Dispose()
-		r.target = nil
+	if r.size.X != width || r.size.Y != height {
+		r.size = image.Pt(width, height)
+		if r.target != nil {
+			r.target.Dispose()
+			r.target = nil
+		}
+
 	}
+
 }
 
 // Renderer3DOptions customizes the Begin call.
@@ -88,9 +87,6 @@ type Renderer3DOptions struct {
 func (r *Renderer3D) Begin(screen *Image) *Image {
 	r.resize(screen.Bounds().Dx(), screen.Bounds().Dy())
 	r.ensureTarget()
-	if r.Clear {
-		r.target.Fill(r.ClearColor)
-	}
 	return r.target
 }
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"image/color"
 	"log"
 	"math"
 
@@ -29,8 +28,6 @@ func NewGame() (*Game, error) {
 	vertices, indices := buildCube(float32(tw), float32(th))
 
 	renderer3D := ebiten.NewRenderer3D()
-	renderer3D.ClearColor = color.RGBA{60, 20, 11, 255}
-	renderer3D.Clear = true
 
 	return &Game{
 		vertices: vertices,

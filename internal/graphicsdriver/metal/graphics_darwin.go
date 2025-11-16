@@ -611,14 +611,29 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 	}
 
 	w, h := dst.internalSize()
-	g.rce.SetViewport(mtl.Viewport{
-		OriginX: 0,
-		OriginY: 0,
-		Width:   float64(w),
-		Height:  float64(h),
-		ZNear:   -1,
-		ZFar:    1,
-	})
+	if drawMode == graphicsdriver.DrawMode3D {
+		// For offscreen images Ebiten allocates textures at graphics.InternalImageSize(width) (next power of two)
+		// so sometimes render target actually has a different backing dimensions (e.g. 640 => 1024).
+		// Every 3D draw is scaled to the padded width/height, which shifts the apparent center toward the right and bottom.
+		// Use actual image dimensions in 3D mode.
+		g.rce.SetViewport(mtl.Viewport{
+			OriginX: 0,
+			OriginY: 0,
+			Width:   float64(dst.width),
+			Height:  float64(dst.height),
+			ZNear:   0,
+			ZFar:    1,
+		})
+	} else {
+		g.rce.SetViewport(mtl.Viewport{
+			OriginX: 0,
+			OriginY: 0,
+			Width:   float64(w),
+			Height:  float64(h),
+			ZNear:   -1,
+			ZFar:    1,
+		})
+	}
 	g.rce.SetVertexBuffer(g.vb, 0, 0)
 
 	if len(uniforms) > 0 {
