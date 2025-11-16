@@ -516,6 +516,18 @@ func (g *Graphics) Initialize() error {
 	g.depthState3D = g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
 		DepthCompareFunction: mtl.CompareFunctionLessEqual,
 		DepthWriteEnabled:    true,
+		BackFaceStencil: mtl.StencilDescriptor{
+			StencilFailureOperation:   mtl.StencilOperationKeep,
+			DepthFailureOperation:     mtl.StencilOperationKeep,
+			DepthStencilPassOperation: mtl.StencilOperationKeep,
+			StencilCompareFunction:    mtl.CompareFunctionAlways,
+		},
+		FrontFaceStencil: mtl.StencilDescriptor{
+			StencilFailureOperation:   mtl.StencilOperationKeep,
+			DepthFailureOperation:     mtl.StencilOperationKeep,
+			DepthStencilPassOperation: mtl.StencilOperationKeep,
+			StencilCompareFunction:    mtl.CompareFunctionAlways,
+		},
 	})
 
 	g.cq = g.view.getMTLDevice().NewCommandQueue()
@@ -587,7 +599,7 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 			rpd.DepthAttachment.ClearDepth = 1
 		}
 
-		if fillRule != graphicsdriver.FillRuleFillAll {
+		if fillRule != graphicsdriver.FillRuleFillAll || drawMode == graphicsdriver.DrawMode3D {
 			dst.ensureStencil()
 			rpd.StencilAttachment.LoadAction = mtl.LoadActionClear
 			rpd.StencilAttachment.StoreAction = mtl.StoreActionDontCare
@@ -670,9 +682,10 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		if g.depthState3D == (mtl.DepthStencilState{}) {
 			return fmt.Errorf("metal: depth state is not initialized")
 		}
+
 		g.rce.SetDepthStencilState(g.depthState3D)
 		g.rce.SetCullMode(mtl.CullModeBack)
-		g.rce.SetFrontFacingWinding(mtl.WindingCounterClockwise)
+		g.rce.SetFrontFacingWinding(mtl.WindingClockwise)
 		g.rce.SetRenderPipelineState(noStencilRpss)
 		for _, dstRegion := range dstRegions {
 			g.rce.SetScissorRect(mtl.ScissorRect{

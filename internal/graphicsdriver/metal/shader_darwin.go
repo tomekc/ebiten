@@ -153,7 +153,7 @@ func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, ste
 		VertexFunction:   s.vs,
 		FragmentFunction: s.fs,
 	}
-	if stencilMode != noStencil {
+	if stencilMode != noStencil || drawMode == graphicsdriver.DrawMode3D {
 		rpld.StencilAttachmentPixelFormat = mtl.PixelFormatStencil8
 	}
 	if drawMode == graphicsdriver.DrawMode3D {

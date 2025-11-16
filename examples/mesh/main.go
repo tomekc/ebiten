@@ -259,7 +259,7 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	screen.Fill(color.NRGBA{R: 12, G: 18, B: 31, A: 255})
+	screen.Fill(color.NRGBA{R: 62, G: 18, B: 31, A: 255})
 
 	width, height := screen.Size()
 	rt := g.ensureRenderTarget(width, height)
@@ -289,7 +289,7 @@ func (g *Game) Draw3DMesh(target *ebiten.Image) {
 
 	proj := perspective(float32(math.Pi)/3, aspect, 0.1, 10)
 	view := lookAt(vec3{0, 0, 10}, vec3{0, 0, 0}, vec3{0, 1, 0})
-	rotY := rotate(g.angle, vec3{0, 1, 0})
+	rotY := rotate(g.angle, vec3{0, 1, 0.5})
 	model := rotY
 	//rotX := rotate(g.angle*0.5, vec3{1, 0, 0})
 	//model := mulMat4(rotY, rotX)
