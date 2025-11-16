@@ -228,6 +228,11 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	i.pixels = nil
 }
 
+// EnableDepthBuffer ensures the backing atlas image has an associated depth buffer.
+func (i *Image) EnableDepthBuffer() {
+	i.img.EnableDepthBuffer()
+}
+
 // syncPixelsIfNeeded syncs the pixels between CPU and GPU.
 // After syncPixelsIfNeeded, dotsBuffer is cleared, but pixels might remain.
 func (i *Image) syncPixelsIfNeeded() {

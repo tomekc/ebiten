@@ -48,6 +48,13 @@ func (f FillRule) String() string {
 	}
 }
 
+type DrawMode int
+
+const (
+	DrawModeDefault DrawMode = iota
+	DrawMode3D
+)
+
 const (
 	InvalidImageID  = 0
 	InvalidShaderID = 0
@@ -69,6 +76,19 @@ type Graphics interface {
 
 	// DrawTriangles draws an image onto another image with the given parameters.
 	DrawTriangles(dst ImageID, srcs [graphics.ShaderSrcImageCount]ImageID, shader ShaderID, dstRegions []DstRegion, indexOffset int, blend Blend, uniforms []uint32, fillRule FillRule) error
+}
+
+type DrawTrianglesWithMode interface {
+	DrawTrianglesWithMode(dst ImageID, srcs [graphics.ShaderSrcImageCount]ImageID, shader ShaderID, dstRegions []DstRegion, indexOffset int, blend Blend, uniforms []uint32, fillRule FillRule, mode DrawMode) error
+}
+
+// DepthTextureAttacher represents a graphics driver that can attach a depth buffer
+// to an existing image. This is optional and drivers that don't support depth
+// simply omit implementing this interface.
+type DepthTextureAttacher interface {
+	// EnsureDepthForImage guarantees that a depth buffer backing exists for the
+	// specified image size. Calling this multiple times must be safe.
+	EnsureDepthForImage(img ImageID, width, height int) error
 }
 
 type Resetter interface {

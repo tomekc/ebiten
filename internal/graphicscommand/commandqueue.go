@@ -131,10 +131,11 @@ func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.Sh
 	// Remove unused uniform variables so that more commands can be merged.
 	shader.ir.FilterUniformVariables(uniforms)
 
+	mode := dst.drawMode()
 	// TODO: If dst is the screen, reorder the command to be the last.
 	if !split && 0 < len(q.commands) {
 		if last, ok := q.commands[len(q.commands)-1].(*drawTrianglesCommand); ok {
-			if last.CanMergeWithDrawTrianglesCommand(dst, srcs, vertices, blend, shader, uniforms, fillRule) {
+			if last.drawMode == mode && last.CanMergeWithDrawTrianglesCommand(dst, srcs, vertices, blend, shader, uniforms, fillRule) {
 				last.setVertices(q.lastVertices(len(vertices) + last.numVertices()))
 				if last.dstRegions[len(last.dstRegions)-1].Region == dstRegion {
 					last.dstRegions[len(last.dstRegions)-1].IndexCount += len(indices)
@@ -163,6 +164,7 @@ func (q *commandQueue) EnqueueDrawTrianglesCommand(dst *Image, srcs [graphics.Sh
 	c.shader = shader
 	c.uniforms = uniforms
 	c.fillRule = fillRule
+	c.drawMode = mode
 	c.firstCaller = ""
 	if debug.IsDebug {
 		file, line, typ := debug.FirstCaller()

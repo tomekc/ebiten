@@ -58,6 +58,11 @@ func New(width, height int, imageType atlas.ImageType) *Mipmap {
 	}
 }
 
+// EnableDepthBuffer ensures the underlying render target has a depth buffer attached.
+func (m *Mipmap) EnableDepthBuffer() {
+	m.orig.EnableDepthBuffer()
+}
+
 func (m *Mipmap) DumpScreenshot(graphicsDriver graphicsdriver.Graphics, name string, blackbg bool) (string, error) {
 	return m.orig.DumpScreenshot(graphicsDriver, name, blackbg)
 }
