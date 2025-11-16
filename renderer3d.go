@@ -2,7 +2,6 @@ package ebiten
 
 import (
 	"image"
-	"image/color"
 )
 
 const shaderSrc = `
@@ -70,16 +69,6 @@ func (r *Renderer3D) resize(width, height int) {
 
 	}
 
-}
-
-// Renderer3DOptions customizes the Begin call.
-type Renderer3DOptions struct {
-	// Clear indicates whether the target color buffer should be cleared.
-	// The default is true.
-	Clear bool
-
-	// ClearColor is used when Clear is true. Defaults to transparent black.
-	ClearColor color.Color
 }
 
 // Begin returns the underlying render target. Callers should draw their 3D content
