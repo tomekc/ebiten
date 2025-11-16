@@ -132,6 +132,8 @@ type Image struct {
 
 	basePixels Pixels
 
+	depthBufferEnabled bool
+
 	// drawTrianglesHistory is a set of draw-image commands.
 	// TODO: This should be merged with the similar command queue in package graphics (#433).
 	drawTrianglesHistory []*drawTrianglesHistoryItem
@@ -194,6 +196,9 @@ func (i *Image) Extend(width, height int) *Image {
 	}
 
 	newImg := NewImage(width, height, i.imageType)
+	if i.depthBufferEnabled {
+		newImg.EnableDepthBuffer()
+	}
 
 	// Use DrawTriangles instead of WritePixels because the image i might be stale and not have its pixels
 	// information.
@@ -687,6 +692,7 @@ func (i *Image) restore(graphicsDriver graphicsdriver.Graphics) error {
 		// The screen image should also be recreated because framebuffer might
 		// be changed.
 		i.image = graphicscommand.NewImage(w, h, true, "")
+		i.applyPersistentState()
 		i.basePixels.Dispose()
 		i.basePixels = Pixels{}
 		i.clearDrawTrianglesHistory()
@@ -695,6 +701,7 @@ func (i *Image) restore(graphicsDriver graphicsdriver.Graphics) error {
 		return nil
 	case ImageTypeVolatile:
 		i.image = graphicscommand.NewImage(w, h, false, "volatile")
+		i.applyPersistentState()
 		iw, ih := i.image.InternalSize()
 		clearImage(i.image, image.Rect(0, 0, iw, ih))
 		return nil
@@ -770,6 +777,7 @@ func (i *Image) restore(graphicsDriver graphicsdriver.Graphics) error {
 	}
 
 	i.image = gimg
+	i.applyPersistentState()
 	i.clearDrawTrianglesHistory()
 	i.stale = false
 	i.staleRegions = i.staleRegions[:0]
@@ -793,6 +801,22 @@ func (i *Image) Dispose() {
 
 func (i *Image) Dump(graphicsDriver graphicsdriver.Graphics, path string, blackbg bool, rect image.Rectangle) (string, error) {
 	return i.image.Dump(graphicsDriver, path, blackbg, rect)
+}
+
+// EnableDepthBuffer ensures that the underlying graphics resources for this image
+// include a depth buffer. Calling this multiple times is safe.
+func (i *Image) EnableDepthBuffer() {
+	if i.depthBufferEnabled {
+		return
+	}
+	i.depthBufferEnabled = true
+	i.image.EnableDepthBuffer()
+}
+
+func (i *Image) applyPersistentState() {
+	if i.depthBufferEnabled {
+		i.image.EnableDepthBuffer()
+	}
 }
 
 func (i *Image) clearDrawTrianglesHistory() {

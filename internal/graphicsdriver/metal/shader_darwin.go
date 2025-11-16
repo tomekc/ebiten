@@ -59,6 +59,7 @@ type shaderRpsKey struct {
 	blend       graphicsdriver.Blend
 	stencilMode stencilMode
 	screen      bool
+	drawMode    graphicsdriver.DrawMode
 }
 
 type Shader struct {
@@ -137,11 +138,12 @@ func (s *Shader) init(device mtl.Device) error {
 	return nil
 }
 
-func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, stencilMode stencilMode, screen bool) (mtl.RenderPipelineState, error) {
+func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, stencilMode stencilMode, screen bool, drawMode graphicsdriver.DrawMode) (mtl.RenderPipelineState, error) {
 	key := shaderRpsKey{
 		blend:       blend,
 		stencilMode: stencilMode,
 		screen:      screen,
+		drawMode:    drawMode,
 	}
 	if rps, ok := s.rpss[key]; ok {
 		return rps, nil
@@ -153,6 +155,9 @@ func (s *Shader) RenderPipelineState(view *view, blend graphicsdriver.Blend, ste
 	}
 	if stencilMode != noStencil {
 		rpld.StencilAttachmentPixelFormat = mtl.PixelFormatStencil8
+	}
+	if drawMode == graphicsdriver.DrawMode3D {
+		rpld.DepthAttachmentPixelFormat = mtl.PixelFormatDepth32Float
 	}
 
 	// TODO: For the precise pixel format, whether the render target is the screen or not must be considered.

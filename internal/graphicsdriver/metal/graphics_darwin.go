@@ -44,6 +44,8 @@ type Graphics struct {
 	rce  mtl.RenderCommandEncoder
 	dsss map[stencilMode]mtl.DepthStencilState
 
+	depthState3D mtl.DepthStencilState
+
 	screenDrawable ca.MetalDrawable
 
 	// frame is the current frame number.
@@ -59,6 +61,7 @@ type Graphics struct {
 
 	lastDst      *Image
 	lastFillRule graphicsdriver.FillRule
+	lastDrawMode graphicsdriver.DrawMode
 
 	vb mtl.Buffer
 	ib mtl.Buffer
@@ -75,6 +78,9 @@ type Graphics struct {
 
 	pool cocoa.NSAutoreleasePool
 }
+
+var _ graphicsdriver.DepthTextureAttacher = (*Graphics)(nil)
+var _ graphicsdriver.DrawTrianglesWithMode = (*Graphics)(nil)
 
 type stencilMode int
 
@@ -421,6 +427,10 @@ func (g *Graphics) Initialize() error {
 	if g.dsss == nil {
 		g.dsss = map[stencilMode]mtl.DepthStencilState{}
 	}
+	if g.depthState3D != (mtl.DepthStencilState{}) {
+		g.depthState3D.Release()
+		g.depthState3D = mtl.DepthStencilState{}
+	}
 
 	if runtime.GOOS == "ios" {
 		// Initializing a Metal device and a layer must be done in the render thread on iOS.
@@ -491,6 +501,11 @@ func (g *Graphics) Initialize() error {
 		},
 	})
 
+	g.depthState3D = g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
+		DepthCompareFunction: mtl.CompareFunctionLessEqual,
+		DepthWriteEnabled:    true,
+	})
+
 	g.cq = g.view.getMTLDevice().NewCommandQueue()
 	return nil
 }
@@ -502,9 +517,10 @@ func (g *Graphics) flushRenderCommandEncoderIfNeeded() {
 	g.rce.EndEncoding()
 	g.rce = mtl.RenderCommandEncoder{}
 	g.lastDst = nil
+	g.lastDrawMode = graphicsdriver.DrawModeDefault
 }
 
-func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs [graphics.ShaderSrcImageCount]*Image, indexOffset int, shader *Shader, uniforms []uint32, blend graphicsdriver.Blend, fillRule graphicsdriver.FillRule) error {
+func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs [graphics.ShaderSrcImageCount]*Image, indexOffset int, shader *Shader, uniforms []uint32, blend graphicsdriver.Blend, fillRule graphicsdriver.FillRule, drawMode graphicsdriver.DrawMode) error {
 	// In order to create a separate command buffer for the screen, flush the current command buffer.
 	// It's because a drawable will not be released as long as the CommandBuffer referencing it is alive,
 	// it is more efficient to separate CommandBuffers that use the drawable from those that do not.
@@ -515,21 +531,32 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 	// When preparing a stencil buffer, flush the current render command encoder
 	// to make sure the stencil buffer is cleared when loading.
 	// TODO: What about clearing the stencil buffer by vertices?
-	if g.lastDst != dst || g.lastFillRule != fillRule || fillRule != graphicsdriver.FillRuleFillAll {
+	if g.lastDst != dst || g.lastFillRule != fillRule || g.lastDrawMode != drawMode || fillRule != graphicsdriver.FillRuleFillAll {
 		g.flushRenderCommandEncoderIfNeeded()
 	}
 	g.lastDst = dst
 	g.lastFillRule = fillRule
+	g.lastDrawMode = drawMode
+
+	if drawMode == graphicsdriver.DrawMode3D && fillRule != graphicsdriver.FillRuleFillAll {
+		return fmt.Errorf("metal: 3d draw does not support non FillAll rules")
+	}
+
+	if drawMode == graphicsdriver.DrawMode3D {
+		w, h := dst.internalSize()
+		dst.ensureDepth(w, h)
+		if dst.depth == (mtl.Texture{}) {
+			return fmt.Errorf("metal: no depth buffer available for 3d draw")
+		}
+	}
 
 	if g.rce == (mtl.RenderCommandEncoder{}) {
 		rpd := mtl.RenderPassDescriptor{}
-		// Even though the destination pixels are not used, mtl.LoadActionDontCare might cause glitches
-		// (#1019). Always using mtl.LoadActionLoad is safe.
-		if dst.screen {
-			rpd.ColorAttachments[0].LoadAction = mtl.LoadActionClear
-		} else {
-			rpd.ColorAttachments[0].LoadAction = mtl.LoadActionLoad
+		colorLoad := mtl.LoadActionLoad
+		if dst.screen || drawMode == graphicsdriver.DrawMode3D {
+			colorLoad = mtl.LoadActionClear
 		}
+		rpd.ColorAttachments[0].LoadAction = colorLoad
 
 		// The store action should always be 'store' even for the screen (#1700).
 		rpd.ColorAttachments[0].StoreAction = mtl.StoreActionStore
@@ -540,6 +567,13 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		}
 		rpd.ColorAttachments[0].Texture = t
 		rpd.ColorAttachments[0].ClearColor = mtl.ClearColor{}
+
+		if drawMode == graphicsdriver.DrawMode3D {
+			rpd.DepthAttachment.LoadAction = mtl.LoadActionClear
+			rpd.DepthAttachment.StoreAction = mtl.StoreActionDontCare
+			rpd.DepthAttachment.Texture = dst.depth
+			rpd.DepthAttachment.ClearDepth = 1
+		}
 
 		if fillRule != graphicsdriver.FillRuleFillAll {
 			dst.ensureStencil()
@@ -584,32 +618,61 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		invertStencilRpss    mtl.RenderPipelineState
 		drawWithStencilRpss  mtl.RenderPipelineState
 	)
-	switch fillRule {
-	case graphicsdriver.FillRuleFillAll:
-		s, err := shader.RenderPipelineState(&g.view, blend, noStencil, dst.screen)
+	if drawMode == graphicsdriver.DrawMode3D {
+		s, err := shader.RenderPipelineState(&g.view, blend, noStencil, dst.screen, drawMode)
 		if err != nil {
 			return err
 		}
 		noStencilRpss = s
-	case graphicsdriver.FillRuleNonZero:
-		s, err := shader.RenderPipelineState(&g.view, blend, incrementStencil, dst.screen)
-		if err != nil {
-			return err
+	} else {
+		switch fillRule {
+		case graphicsdriver.FillRuleFillAll:
+			s, err := shader.RenderPipelineState(&g.view, blend, noStencil, dst.screen, drawMode)
+			if err != nil {
+				return err
+			}
+			noStencilRpss = s
+		case graphicsdriver.FillRuleNonZero:
+			s, err := shader.RenderPipelineState(&g.view, blend, incrementStencil, dst.screen, drawMode)
+			if err != nil {
+				return err
+			}
+			incrementStencilRpss = s
+		case graphicsdriver.FillRuleEvenOdd:
+			s, err := shader.RenderPipelineState(&g.view, blend, invertStencil, dst.screen, drawMode)
+			if err != nil {
+				return err
+			}
+			invertStencilRpss = s
 		}
-		incrementStencilRpss = s
-	case graphicsdriver.FillRuleEvenOdd:
-		s, err := shader.RenderPipelineState(&g.view, blend, invertStencil, dst.screen)
-		if err != nil {
-			return err
+		if fillRule != graphicsdriver.FillRuleFillAll {
+			s, err := shader.RenderPipelineState(&g.view, blend, drawWithStencil, dst.screen, drawMode)
+			if err != nil {
+				return err
+			}
+			drawWithStencilRpss = s
 		}
-		invertStencilRpss = s
 	}
-	if fillRule != graphicsdriver.FillRuleFillAll {
-		s, err := shader.RenderPipelineState(&g.view, blend, drawWithStencil, dst.screen)
-		if err != nil {
-			return err
+
+	if drawMode == graphicsdriver.DrawMode3D {
+		if g.depthState3D == (mtl.DepthStencilState{}) {
+			return fmt.Errorf("metal: depth state is not initialized")
 		}
-		drawWithStencilRpss = s
+		g.rce.SetDepthStencilState(g.depthState3D)
+		g.rce.SetCullMode(mtl.CullModeBack)
+		g.rce.SetFrontFacingWinding(mtl.WindingCounterClockwise)
+		g.rce.SetRenderPipelineState(noStencilRpss)
+		for _, dstRegion := range dstRegions {
+			g.rce.SetScissorRect(mtl.ScissorRect{
+				X:      dstRegion.Region.Min.X,
+				Y:      dstRegion.Region.Min.Y,
+				Width:  dstRegion.Region.Dx(),
+				Height: dstRegion.Region.Dy(),
+			})
+			g.rce.DrawIndexedPrimitives(mtl.PrimitiveTypeTriangle, dstRegion.IndexCount, mtl.IndexTypeUInt32, g.ib, indexOffset*int(unsafe.Sizeof(uint32(0))))
+			indexOffset += dstRegion.IndexCount
+		}
+		return nil
 	}
 
 	for _, dstRegion := range dstRegions {
@@ -647,6 +710,10 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 }
 
 func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule) error {
+	return g.DrawTrianglesWithMode(dstID, srcIDs, shaderID, dstRegions, indexOffset, blend, uniforms, fillRule, graphicsdriver.DrawModeDefault)
+}
+
+func (g *Graphics) DrawTrianglesWithMode(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule, mode graphicsdriver.DrawMode) error {
 	if shaderID == graphicsdriver.InvalidShaderID {
 		return fmt.Errorf("metal: shader ID is invalid")
 	}
@@ -662,7 +729,7 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 		srcs[i] = g.images[srcID]
 	}
 
-	if err := g.draw(dst, dstRegions, srcs, indexOffset, g.shaders[shaderID], uniforms, blend, fillRule); err != nil {
+	if err := g.draw(dst, dstRegions, srcs, indexOffset, g.shaders[shaderID], uniforms, blend, fillRule, mode); err != nil {
 		return err
 	}
 
@@ -735,6 +802,19 @@ func (g *Graphics) NewShader(program *shaderir.Program) (graphicsdriver.Shader, 
 	return s, nil
 }
 
+func (g *Graphics) EnsureDepthForImage(imgID graphicsdriver.ImageID, width, height int) error {
+	img, ok := g.images[imgID]
+	if !ok {
+		return fmt.Errorf("metal: image ID %d was not found when ensuring depth", imgID)
+	}
+	if width <= 0 || height <= 0 {
+		w, h := img.internalSize()
+		width, height = w, h
+	}
+	img.ensureDepth(width, height)
+	return nil
+}
+
 func (g *Graphics) addShader(shader *Shader) {
 	if g.shaders == nil {
 		g.shaders = map[graphicsdriver.ShaderID]*Shader{}
@@ -757,6 +837,7 @@ type Image struct {
 	screen   bool
 	texture  mtl.Texture
 	stencil  mtl.Texture
+	depth    mtl.Texture
 }
 
 func (i *Image) ID() graphicsdriver.ImageID {
@@ -774,6 +855,10 @@ func (i *Image) Dispose() {
 	if i.stencil != (mtl.Texture{}) {
 		i.stencil.Release()
 		i.stencil = mtl.Texture{}
+	}
+	if i.depth != (mtl.Texture{}) {
+		i.depth.Release()
+		i.depth = mtl.Texture{}
 	}
 	if i.texture != (mtl.Texture{}) {
 		i.texture.Release()
@@ -896,6 +981,26 @@ func (i *Image) ensureStencil() {
 		Usage:       mtl.TextureUsageRenderTarget,
 	}
 	i.stencil = i.graphics.view.getMTLDevice().NewTextureWithDescriptor(td)
+}
+
+func (i *Image) ensureDepth(width, height int) {
+	if i.depth != (mtl.Texture{}) {
+		if i.depth.Width() == width && i.depth.Height() == height {
+			return
+		}
+		i.depth.Release()
+		i.depth = mtl.Texture{}
+	}
+
+	td := mtl.TextureDescriptor{
+		TextureType: mtl.TextureType2D,
+		PixelFormat: mtl.PixelFormatDepth32Float,
+		Width:       width,
+		Height:      height,
+		StorageMode: mtl.StorageModePrivate,
+		Usage:       mtl.TextureUsageRenderTarget,
+	}
+	i.depth = i.graphics.view.getMTLDevice().NewTextureWithDescriptor(td)
 }
 
 // adjustUniformVariablesLayout returns adjusted uniform variables to match the Metal's memory layout.

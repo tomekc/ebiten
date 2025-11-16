@@ -70,6 +70,7 @@ type drawTrianglesCommand struct {
 	shader      *Shader
 	uniforms    []uint32
 	fillRule    graphicsdriver.FillRule
+	drawMode    graphicsdriver.DrawMode
 	firstCaller string
 }
 
@@ -159,6 +160,9 @@ func (c *drawTrianglesCommand) Exec(commandQueue *commandQueue, graphicsDriver g
 		imgs[i] = src.image.ID()
 	}
 
+	if adv, ok := graphicsDriver.(graphicsdriver.DrawTrianglesWithMode); ok {
+		return adv.DrawTrianglesWithMode(c.dst.image.ID(), imgs, c.shader.shader.ID(), c.dstRegions, indexOffset, c.blend, c.uniforms, c.fillRule, c.drawMode)
+	}
 	return graphicsDriver.DrawTriangles(c.dst.image.ID(), imgs, c.shader.shader.ID(), c.dstRegions, indexOffset, c.blend, c.uniforms, c.fillRule)
 }
 
@@ -335,6 +339,32 @@ func (c *disposeImageCommand) Exec(commandQueue *commandQueue, graphicsDriver gr
 
 func (c *disposeImageCommand) NeedsSync() bool {
 	return false
+}
+
+// enableDepthBufferCommand represents a command to attach a depth buffer to an image.
+type enableDepthBufferCommand struct {
+	target *Image
+}
+
+func (c *enableDepthBufferCommand) String() string {
+	return fmt.Sprintf("enable-depth-buffer: target: %d", c.target.id)
+}
+
+// Exec executes the enableDepthBufferCommand.
+func (c *enableDepthBufferCommand) Exec(commandQueue *commandQueue, graphicsDriver graphicsdriver.Graphics, indexOffset int) error {
+	attacher, ok := graphicsDriver.(graphicsdriver.DepthTextureAttacher)
+	if !ok {
+		return nil
+	}
+	if c.target.image == nil {
+		return fmt.Errorf("graphicscommand: image is not initialized when enabling a depth buffer")
+	}
+	w, h := c.target.InternalSize()
+	return attacher.EnsureDepthForImage(c.target.image.ID(), w, h)
+}
+
+func (c *enableDepthBufferCommand) NeedsSync() bool {
+	return true
 }
 
 // disposeShaderCommand represents a command to dispose a shader.

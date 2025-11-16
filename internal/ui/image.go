@@ -121,6 +121,12 @@ func (i *Image) DrawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	i.mipmap.DrawTriangles(srcMipmaps, vertices, indices, blend, dstRegion, srcRegions, shader.shader, uniforms, fillRule, canSkipMipmap, hint, projectionMatrix)
 }
 
+// EnableDepthBuffer ensures the backing mipmap image has an attached depth buffer.
+func (i *Image) EnableDepthBuffer() {
+	i.flushBufferIfNeeded()
+	i.mipmap.EnableDepthBuffer()
+}
+
 func (i *Image) WritePixels(pix []byte, region image.Rectangle) {
 	if i.modifyCallback != nil {
 		i.modifyCallback()

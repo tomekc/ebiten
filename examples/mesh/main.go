@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"image"
 	"image/color"
 	"log"
 	"math"
@@ -167,6 +168,7 @@ type Game struct {
 	indices  []uint16
 	angle    float32
 	texture  *ebiten.Image
+	rt       *ebiten.Image
 }
 
 func NewGame() (*Game, error) {
@@ -259,13 +261,30 @@ func (g *Game) Update() error {
 func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.NRGBA{R: 12, G: 18, B: 31, A: 255})
 
-	g.Draw3DMesh(screen)
+	width, height := screen.Size()
+	rt := g.ensureRenderTarget(width, height)
+	g.Draw3DMesh(rt)
+	screen.DrawImage(rt, nil)
 
 	ebitenutil.DebugPrint(screen, "Mesh example: rotating flat-shaded cube")
 }
 
-func (g *Game) Draw3DMesh(screen *ebiten.Image) {
-	width, height := screen.Size()
+func (g *Game) ensureRenderTarget(width, height int) *ebiten.Image {
+	if g.rt != nil {
+		w, h := g.rt.Size()
+		if w == width && h == height {
+			return g.rt
+		}
+		g.rt.Dispose()
+	}
+	rt := ebiten.NewImageWithOptions(image.Rect(0, 0, width, height), &ebiten.NewImageOptions{Unmanaged: true})
+	rt.EnableDepthBuffer()
+	g.rt = rt
+	return g.rt
+}
+
+func (g *Game) Draw3DMesh(target *ebiten.Image) {
+	width, height := target.Size()
 	aspect := float32(width) / float32(height)
 
 	proj := perspective(float32(math.Pi)/3, aspect, 0.1, 10)
@@ -304,7 +323,7 @@ func (g *Game) Draw3DMesh(screen *ebiten.Image) {
 	//	log.Printf("Vertex %d: %v", i, sceen)
 	//}
 
-	screen.DrawTrianglesShader(g.vertices, g.indices, g.shader, opts)
+	target.DrawTrianglesShader(g.vertices, g.indices, g.shader, opts)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {

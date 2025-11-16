@@ -46,6 +46,8 @@ type Image struct {
 	// have its graphicsdriver.Image.
 	id int
 
+	depthBufferEnabled bool
+
 	bufferedWritePixelsArgs []writePixelsCommandArgs
 }
 
@@ -91,6 +93,25 @@ func (i *Image) flushBufferedWritePixels() {
 	theCommandQueueManager.enqueueCommand(c)
 
 	i.bufferedWritePixelsArgs = nil
+}
+
+// EnableDepthBuffer attaches a depth buffer to this image if the underlying
+// graphics backend supports it. Calling this multiple times is safe.
+func (i *Image) EnableDepthBuffer() {
+	if i.depthBufferEnabled {
+		return
+	}
+	i.flushBufferedWritePixels()
+	c := &enableDepthBufferCommand{target: i}
+	theCommandQueueManager.enqueueCommand(c)
+	i.depthBufferEnabled = true
+}
+
+func (i *Image) drawMode() graphicsdriver.DrawMode {
+	if i.depthBufferEnabled {
+		return graphicsdriver.DrawMode3D
+	}
+	return graphicsdriver.DrawModeDefault
 }
 
 func (i *Image) Dispose() {

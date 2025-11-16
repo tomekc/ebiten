@@ -470,6 +470,28 @@ func (i *Image) drawTriangles(srcs [graphics.ShaderSrcImageCount]*Image, vertice
 	i.backend.restorable.DrawTriangles(imgs, vertices, indices, blend, dstRegion, srcRegions, shader.ensureShader(), uniforms, fillRule, hint, projectionMatrix)
 }
 
+// EnableDepthBuffer ensures that the underlying restorable image backing this atlas image
+// has a depth buffer. This is only valid for unmanaged or volatile images that are not on an atlas.
+func (i *Image) EnableDepthBuffer() {
+	backendsM.Lock()
+	defer backendsM.Unlock()
+
+	if i.imageType != ImageTypeUnmanaged && i.imageType != ImageTypeVolatile {
+		panic("atlas: EnableDepthBuffer is only supported on unmanaged or volatile images")
+	}
+
+	if i.backend == nil {
+		// Allocate as a destination since the image will be rendered into.
+		i.allocate(nil, false)
+	}
+
+	if i.node != nil {
+		panic("atlas: EnableDepthBuffer cannot be used on atlas-backed images")
+	}
+
+	i.backend.restorable.EnableDepthBuffer()
+}
+
 // WritePixels replaces the pixels on the image.
 func (i *Image) WritePixels(pix []byte, region image.Rectangle) {
 	backendsM.Lock()

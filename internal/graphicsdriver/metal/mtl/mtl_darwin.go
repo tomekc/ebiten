@@ -112,6 +112,7 @@ const (
 	PixelFormatRGBA8UNormSRGB PixelFormat = 71  // Ordinary format with four 8-bit normalized unsigned integer components in RGBA order with conversion between sRGB and linear space.
 	PixelFormatBGRA8UNorm     PixelFormat = 80  // Ordinary format with four 8-bit normalized unsigned integer components in BGRA order.
 	PixelFormatBGRA8UNormSRGB PixelFormat = 81  // Ordinary format with four 8-bit normalized unsigned integer components in BGRA order with conversion between sRGB and linear space.
+	PixelFormatDepth32Float   PixelFormat = 252 // Indicates a 32-bit format that is suitable for depth stencils.
 	PixelFormatStencil8       PixelFormat = 253 // A pixel format with an 8-bit unsigned integer component, used for a stencil render target.
 )
 
@@ -127,6 +128,21 @@ const (
 	PrimitiveTypeLineStrip     PrimitiveType = 2
 	PrimitiveTypeTriangle      PrimitiveType = 3
 	PrimitiveTypeTriangleStrip PrimitiveType = 4
+)
+
+type CullMode uint8
+
+const (
+	CullModeNone  CullMode = 0
+	CullModeFront CullMode = 1
+	CullModeBack  CullMode = 2
+)
+
+type Winding uint8
+
+const (
+	WindingClockwise        Winding = 0
+	WindingCounterClockwise Winding = 1
 )
 
 // LoadAction defines actions performed at the start of a rendering pass
@@ -379,6 +395,9 @@ type RenderPipelineDescriptor struct {
 
 	// StencilAttachmentPixelFormat is the pixel format of the attachment that stores stencil data.
 	StencilAttachmentPixelFormat PixelFormat
+
+	// DepthAttachmentPixelFormat is the pixel format of the attachment that stores depth data.
+	DepthAttachmentPixelFormat PixelFormat
 }
 
 // RenderPipelineColorAttachmentDescriptor describes a color render target that specifies
@@ -411,6 +430,9 @@ type RenderPassDescriptor struct {
 
 	// StencilAttachment is state information for an attachment that stores stencil data.
 	StencilAttachment RenderPassStencilAttachment
+
+	// DepthAttachment is state information for an attachment that stores depth data.
+	DepthAttachment RenderPassDepthAttachment
 }
 
 // RenderPassColorAttachmentDescriptor describes a color render target that serves
@@ -428,6 +450,12 @@ type RenderPassColorAttachmentDescriptor struct {
 // Reference: https://developer.apple.com/documentation/metal/mtlrenderpassstencilattachmentdescriptor?language=objc.
 type RenderPassStencilAttachment struct {
 	RenderPassAttachmentDescriptor
+}
+
+// RenderPassDepthAttachment describes a depth render target used in a render pass.
+type RenderPassDepthAttachment struct {
+	RenderPassAttachmentDescriptor
+	ClearDepth float64
 }
 
 // RenderPassAttachmentDescriptor describes a render target that serves
@@ -511,6 +539,7 @@ var (
 	sel_setRgbBlendOperation                                                                                                          = objc.RegisterName("setRgbBlendOperation:")
 	sel_setWriteMask                                                                                                                  = objc.RegisterName("setWriteMask:")
 	sel_setStencilAttachmentPixelFormat                                                                                               = objc.RegisterName("setStencilAttachmentPixelFormat:")
+	sel_setDepthAttachmentPixelFormat                                                                                                 = objc.RegisterName("setDepthAttachmentPixelFormat:")
 	sel_newRenderPipelineStateWithDescriptor_error                                                                                    = objc.RegisterName("newRenderPipelineStateWithDescriptor:error:")
 	sel_newBufferWithBytes_length_options                                                                                             = objc.RegisterName("newBufferWithBytes:length:options:")
 	sel_newBufferWithLength_options                                                                                                   = objc.RegisterName("newBufferWithLength:options:")
@@ -536,6 +565,8 @@ var (
 	sel_setStoreAction                                                                                                                = objc.RegisterName("setStoreAction:")
 	sel_setTexture                                                                                                                    = objc.RegisterName("setTexture:")
 	sel_setClearColor                                                                                                                 = objc.RegisterName("setClearColor:")
+	sel_depthAttachment                                                                                                               = objc.RegisterName("depthAttachment")
+	sel_setClearDepth                                                                                                                 = objc.RegisterName("setClearDepth:")
 	sel_blitCommandEncoder                                                                                                            = objc.RegisterName("blitCommandEncoder")
 	sel_endEncoding                                                                                                                   = objc.RegisterName("endEncoding")
 	sel_setRenderPipelineState                                                                                                        = objc.RegisterName("setRenderPipelineState:")
@@ -547,6 +578,8 @@ var (
 	sel_setFragmentTexture_atIndex                                                                                                    = objc.RegisterName("setFragmentTexture:atIndex:")
 	sel_setBlendColorRedGreenBlueAlpha                                                                                                = objc.RegisterName("setBlendColorRed:green:blue:alpha:")
 	sel_setDepthStencilState                                                                                                          = objc.RegisterName("setDepthStencilState:")
+	sel_setCullMode                                                                                                                   = objc.RegisterName("setCullMode:")
+	sel_setFrontFacingWinding                                                                                                         = objc.RegisterName("setFrontFacingWinding:")
 	sel_drawPrimitives_vertexStart_vertexCount                                                                                        = objc.RegisterName("drawPrimitives:vertexStart:vertexCount:")
 	sel_drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset                                                      = objc.RegisterName("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:")
 	sel_synchronizeResource                                                                                                           = objc.RegisterName("synchronizeResource:")
@@ -559,6 +592,8 @@ var (
 	sel_setDepthFailureOperation                                                                                                      = objc.RegisterName("setDepthFailureOperation:")
 	sel_setDepthStencilPassOperation                                                                                                  = objc.RegisterName("setDepthStencilPassOperation:")
 	sel_setStencilCompareFunction                                                                                                     = objc.RegisterName("setStencilCompareFunction:")
+	sel_setDepthCompareFunction                                                                                                       = objc.RegisterName("setDepthCompareFunction:")
+	sel_setDepthWriteEnabled                                                                                                          = objc.RegisterName("setDepthWriteEnabled:")
 	sel_newDepthStencilStateWithDescriptor                                                                                            = objc.RegisterName("newDepthStencilStateWithDescriptor:")
 	sel_replaceRegion_mipmapLevel_withBytes_bytesPerRow                                                                               = objc.RegisterName("replaceRegion:mipmapLevel:withBytes:bytesPerRow:")
 	sel_getBytes_bytesPerRow_fromRegion_mipmapLevel                                                                                   = objc.RegisterName("getBytes:bytesPerRow:fromRegion:mipmapLevel:")
@@ -690,6 +725,7 @@ func (d Device) NewRenderPipelineStateWithDescriptor(rpd RenderPipelineDescripto
 	colorAttachments0.Send(sel_setRgbBlendOperation, uintptr(rpd.ColorAttachments[0].RGBBlendOperation))
 	colorAttachments0.Send(sel_setWriteMask, uintptr(rpd.ColorAttachments[0].WriteMask))
 	renderPipelineDescriptor.Send(sel_setStencilAttachmentPixelFormat, uintptr(rpd.StencilAttachmentPixelFormat))
+	renderPipelineDescriptor.Send(sel_setDepthAttachmentPixelFormat, uintptr(rpd.DepthAttachmentPixelFormat))
 	var err cocoa.NSError
 	renderPipelineState := d.device.Send(sel_newRenderPipelineStateWithDescriptor_error,
 		renderPipelineDescriptor,
@@ -750,6 +786,8 @@ func (d Device) NewDepthStencilStateWithDescriptor(dsd DepthStencilDescriptor) D
 	frontFaceStencil.Send(sel_setDepthFailureOperation, uintptr(dsd.FrontFaceStencil.DepthFailureOperation))
 	frontFaceStencil.Send(sel_setDepthStencilPassOperation, uintptr(dsd.FrontFaceStencil.DepthStencilPassOperation))
 	frontFaceStencil.Send(sel_setStencilCompareFunction, uintptr(dsd.FrontFaceStencil.StencilCompareFunction))
+	depthStencilDescriptor.Send(sel_setDepthCompareFunction, uintptr(dsd.DepthCompareFunction))
+	depthStencilDescriptor.Send(sel_setDepthWriteEnabled, dsd.DepthWriteEnabled)
 	depthStencilState := d.device.Send(sel_newDepthStencilStateWithDescriptor, depthStencilDescriptor)
 	depthStencilDescriptor.Send(sel_release)
 	return DepthStencilState{
@@ -857,6 +895,13 @@ func (cb CommandBuffer) RenderCommandEncoderWithDescriptor(rpd RenderPassDescrip
 	stencilAttachment.Send(sel_setLoadAction, int(rpd.StencilAttachment.LoadAction))
 	stencilAttachment.Send(sel_setStoreAction, int(rpd.StencilAttachment.StoreAction))
 	stencilAttachment.Send(sel_setTexture, rpd.StencilAttachment.Texture.texture)
+	if rpd.DepthAttachment.Texture.texture != 0 {
+		var depthAttachment = renderPassDescriptor.Send(sel_depthAttachment)
+		depthAttachment.Send(sel_setLoadAction, int(rpd.DepthAttachment.LoadAction))
+		depthAttachment.Send(sel_setStoreAction, int(rpd.DepthAttachment.StoreAction))
+		depthAttachment.Send(sel_setTexture, rpd.DepthAttachment.Texture.texture)
+		depthAttachment.Send(sel_setClearDepth, rpd.DepthAttachment.ClearDepth)
+	}
 	var rce = cb.commandBuffer.Send(sel_renderCommandEncoderWithDescriptor, renderPassDescriptor)
 	renderPassDescriptor.Send(sel_release)
 	return RenderCommandEncoder{CommandEncoder{rce}}
@@ -951,6 +996,14 @@ func (rce RenderCommandEncoder) SetBlendColor(red, green, blue, alpha float32) {
 // Reference: https://developer.apple.com/documentation/metal/mtlrendercommandencoder/1516119-setdepthstencilstate?language=objc.
 func (rce RenderCommandEncoder) SetDepthStencilState(depthStencilState DepthStencilState) {
 	rce.commandEncoder.Send(sel_setDepthStencilState, depthStencilState.depthStencilState)
+}
+
+func (rce RenderCommandEncoder) SetCullMode(mode CullMode) {
+	rce.commandEncoder.Send(sel_setCullMode, uintptr(mode))
+}
+
+func (rce RenderCommandEncoder) SetFrontFacingWinding(winding Winding) {
+	rce.commandEncoder.Send(sel_setFrontFacingWinding, uintptr(winding))
 }
 
 // DrawPrimitives renders one instance of primitives using vertex data
@@ -1234,6 +1287,12 @@ type DepthStencilDescriptor struct {
 
 	// FrontFaceStencil is The stencil descriptor for front-facing primitives.
 	FrontFaceStencil StencilDescriptor
+
+	// DepthCompareFunction is the function that determines if a fragment passes the depth test.
+	DepthCompareFunction CompareFunction
+
+	// DepthWriteEnabled indicates whether depth values are written to the depth attachment.
+	DepthWriteEnabled bool
 }
 
 // StencilDescriptor is an object that defines the front-facing or back-facing stencil operations of a depth and stencil state object.

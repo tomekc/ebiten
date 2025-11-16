@@ -123,6 +123,24 @@ func (i *Image) Clear() {
 	i.Fill(color.Transparent)
 }
 
+// EnableDepthBuffer ensures this image keeps a dedicated depth buffer when used as a render target.
+//
+// EnableDepthBuffer is intended for off-screen render targets that participate in 3D rendering passes.
+// The image must not be a sub-image, and it should be created with NewImageWithOptions using
+// Unmanaged=true so it doesn't live on a shared internal atlas.
+func (i *Image) EnableDepthBuffer() {
+	i.copyCheck()
+	if i.isDisposed() {
+		return
+	}
+	if i.isSubImage() {
+		panic("ebiten: EnableDepthBuffer cannot be called on a sub-image")
+	}
+	i.invokeUsageCallbacks()
+	i.updateAccessTime()
+	i.image.EnableDepthBuffer()
+}
+
 // Fill fills the image with a solid color.
 //
 // When the image is disposed, Fill does nothing.
