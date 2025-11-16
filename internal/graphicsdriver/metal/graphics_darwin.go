@@ -444,7 +444,13 @@ func (g *Graphics) Initialize() error {
 	g.view.ml.SetOpaque(!g.transparent)
 
 	// The stencil reference value is always 0 (default).
+	baseNoDepth := mtl.DepthStencilDescriptor{
+		DepthCompareFunction: mtl.CompareFunctionAlways,
+		DepthWriteEnabled:    false,
+	}
 	g.dsss[noStencil] = g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
+		DepthCompareFunction: baseNoDepth.DepthCompareFunction,
+		DepthWriteEnabled:    baseNoDepth.DepthWriteEnabled,
 		BackFaceStencil: mtl.StencilDescriptor{
 			StencilFailureOperation:   mtl.StencilOperationKeep,
 			DepthFailureOperation:     mtl.StencilOperationKeep,
@@ -459,6 +465,8 @@ func (g *Graphics) Initialize() error {
 		},
 	})
 	g.dsss[incrementStencil] = g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
+		DepthCompareFunction: baseNoDepth.DepthCompareFunction,
+		DepthWriteEnabled:    baseNoDepth.DepthWriteEnabled,
 		BackFaceStencil: mtl.StencilDescriptor{
 			StencilFailureOperation:   mtl.StencilOperationKeep,
 			DepthFailureOperation:     mtl.StencilOperationKeep,
@@ -473,6 +481,8 @@ func (g *Graphics) Initialize() error {
 		},
 	})
 	g.dsss[invertStencil] = g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
+		DepthCompareFunction: baseNoDepth.DepthCompareFunction,
+		DepthWriteEnabled:    baseNoDepth.DepthWriteEnabled,
 		BackFaceStencil: mtl.StencilDescriptor{
 			StencilFailureOperation:   mtl.StencilOperationKeep,
 			DepthFailureOperation:     mtl.StencilOperationKeep,
@@ -487,6 +497,8 @@ func (g *Graphics) Initialize() error {
 		},
 	})
 	g.dsss[drawWithStencil] = g.view.getMTLDevice().NewDepthStencilStateWithDescriptor(mtl.DepthStencilDescriptor{
+		DepthCompareFunction: baseNoDepth.DepthCompareFunction,
+		DepthWriteEnabled:    baseNoDepth.DepthWriteEnabled,
 		BackFaceStencil: mtl.StencilDescriptor{
 			StencilFailureOperation:   mtl.StencilOperationKeep,
 			DepthFailureOperation:     mtl.StencilOperationKeep,
