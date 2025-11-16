@@ -33,6 +33,7 @@ func NewGraphics(canvas js.Value, colorSpace graphicsdriver.ColorSpace) (graphic
 	attr := js.Global().Get("Object").New()
 	attr.Set("alpha", true)
 	attr.Set("premultipliedAlpha", true)
+	attr.Set("depth", true)
 	attr.Set("stencil", true)
 
 	glContext = canvas.Call("getContext", "webgl2", attr)

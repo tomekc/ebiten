@@ -25,14 +25,19 @@ import (
 )
 
 type Image struct {
-	id          graphicsdriver.ImageID
-	graphics    *Graphics
-	texture     textureNative
-	stencil     renderbufferNative
-	framebuffer *framebuffer
-	width       int
-	height      int
-	screen      bool
+	id                 graphicsdriver.ImageID
+	graphics           *Graphics
+	texture            textureNative
+	stencil            renderbufferNative
+	depth              renderbufferNative
+	framebuffer        *framebuffer
+	depthWidth         int
+	depthHeight        int
+	width              int
+	height             int
+	screen             bool
+	depthBufferEnabled bool
+	last3DClearFrame   int64
 }
 
 // framebuffer is a wrapper of OpenGL's framebuffer.
@@ -56,15 +61,22 @@ func (i *Image) Dispose() {
 	if i.stencil != 0 {
 		i.graphics.context.deleteRenderbuffer(i.stencil)
 	}
+	if i.depth != 0 {
+		i.graphics.context.deleteRenderbuffer(i.depth)
+	}
 
 	i.graphics.removeImage(i)
 }
 
-func (i *Image) setViewport() error {
+func (i *Image) setViewport(mode graphicsdriver.DrawMode) error {
 	if err := i.ensureFramebuffer(); err != nil {
 		return err
 	}
-	i.graphics.context.setViewport(i.framebuffer)
+	width, height := i.viewportSize()
+	if mode == graphicsdriver.DrawMode3D {
+		width, height = i.logicalSize()
+	}
+	i.graphics.context.setViewport(i.framebuffer, width, height)
 	return nil
 }
 
@@ -118,7 +130,12 @@ func (i *Image) ensureStencilBuffer() error {
 		return err
 	}
 
-	r, err := i.graphics.context.newRenderbuffer(i.viewportSize())
+	w, h := i.viewportSize()
+	format := uint32(gl.STENCIL_INDEX8)
+	if !i.graphics.context.ctx.IsES() {
+		format = uint32(gl.DEPTH24_STENCIL8)
+	}
+	r, err := i.graphics.context.newRenderbuffer(format, w, h)
 	if err != nil {
 		return err
 	}
@@ -128,6 +145,64 @@ func (i *Image) ensureStencilBuffer() error {
 		return err
 	}
 	return nil
+}
+
+func (i *Image) ensureDepthBufferSize(width, height int) error {
+	if err := i.ensureFramebuffer(); err != nil {
+		return err
+	}
+	if i.depth != 0 && i.depthWidth == width && i.depthHeight == height {
+		return nil
+	}
+
+	if i.depth != 0 {
+		i.graphics.context.deleteRenderbuffer(i.depth)
+		i.depth = 0
+	}
+
+	format := uint32(gl.DEPTH_COMPONENT16)
+	if !i.graphics.context.ctx.IsES() {
+		format = uint32(gl.DEPTH_COMPONENT24)
+	}
+
+	r, err := i.graphics.context.newRenderbuffer(format, width, height)
+	if err != nil {
+		return err
+	}
+	if err := i.graphics.context.bindDepthBuffer(i.framebuffer.native, r); err != nil {
+		i.graphics.context.deleteRenderbuffer(r)
+		return err
+	}
+
+	i.depth = r
+	i.depthWidth = width
+	i.depthHeight = height
+	i.last3DClearFrame = -1
+	return nil
+}
+
+func (i *Image) ensureDepthBuffer() error {
+	w, h := i.viewportSize()
+	return i.ensureDepthBufferSize(w, h)
+}
+
+func (i *Image) logicalSize() (int, int) {
+	return i.width, i.height
+}
+
+func (i *Image) viewportSizeForMode(mode graphicsdriver.DrawMode) (int, int) {
+	if mode == graphicsdriver.DrawMode3D {
+		return i.logicalSize()
+	}
+	return i.viewportSize()
+}
+
+func (i *Image) needs3DClear(frame int64) bool {
+	if i.last3DClearFrame != frame {
+		i.last3DClearFrame = frame
+		return true
+	}
+	return false
 }
 
 func (i *Image) WritePixels(args []graphicsdriver.PixelsArgs) error {

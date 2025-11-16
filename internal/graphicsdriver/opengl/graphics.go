@@ -31,6 +31,11 @@ type activatedTexture struct {
 	index         int
 }
 
+var (
+	_ graphicsdriver.DepthTextureAttacher  = (*Graphics)(nil)
+	_ graphicsdriver.DrawTrianglesWithMode = (*Graphics)(nil)
+)
+
 type Graphics struct {
 	state   openGLState
 	context context
@@ -44,6 +49,8 @@ type Graphics struct {
 
 	// drawCalled is true just after Draw is called. This holds true until WritePixels is called.
 	drawCalled bool
+
+	frame int64
 
 	uniformVariableNameCache map[int]string
 	textureVariableNameCache map[int]string
@@ -85,6 +92,7 @@ func (g *Graphics) End(present bool) error {
 		if err := g.swapBuffers(); err != nil {
 			return err
 		}
+		g.frame++
 	}
 
 	return nil
@@ -122,10 +130,11 @@ func (g *Graphics) genNextShaderID() graphicsdriver.ShaderID {
 
 func (g *Graphics) NewImage(width, height int) (graphicsdriver.Image, error) {
 	i := &Image{
-		id:       g.genNextImageID(),
-		graphics: g,
-		width:    width,
-		height:   height,
+		id:               g.genNextImageID(),
+		graphics:         g,
+		width:            width,
+		height:           height,
+		last3DClearFrame: -1,
 	}
 	w := graphics.InternalImageSize(width)
 	h := graphics.InternalImageSize(height)
@@ -142,11 +151,12 @@ func (g *Graphics) NewImage(width, height int) (graphicsdriver.Image, error) {
 func (g *Graphics) NewScreenFramebufferImage(width, height int) (graphicsdriver.Image, error) {
 	g.checkSize(width, height)
 	i := &Image{
-		id:       g.genNextImageID(),
-		graphics: g,
-		width:    width,
-		height:   height,
-		screen:   true,
+		id:               g.genNextImageID(),
+		graphics:         g,
+		width:            width,
+		height:           height,
+		screen:           true,
+		last3DClearFrame: -1,
 	}
 	g.addImage(i)
 	return i, nil
@@ -199,6 +209,10 @@ func (g *Graphics) uniformVariableName(idx int) string {
 }
 
 func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule) error {
+	return g.DrawTrianglesWithMode(dstID, srcIDs, shaderID, dstRegions, indexOffset, blend, uniforms, fillRule, graphicsdriver.DrawModeDefault)
+}
+
+func (g *Graphics) DrawTrianglesWithMode(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule, drawMode graphicsdriver.DrawMode) error {
 	if shaderID == graphicsdriver.InvalidShaderID {
 		return fmt.Errorf("opengl: shader ID is invalid")
 	}
@@ -207,7 +221,7 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 
 	g.drawCalled = true
 
-	if err := destination.setViewport(); err != nil {
+	if err := destination.setViewport(drawMode); err != nil {
 		return err
 	}
 	g.context.blend(blend)
@@ -258,6 +272,24 @@ func (g *Graphics) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.
 		g.uniformVars[i] = uniformVariable{}
 	}
 	g.uniformVars = g.uniformVars[:0]
+
+	use3D := drawMode == graphicsdriver.DrawMode3D
+	if use3D {
+		if !destination.depthBufferEnabled {
+			return fmt.Errorf("opengl: draw target must enable depth buffer for drawMode3D")
+		}
+		if err := destination.ensureDepthBuffer(); err != nil {
+			return err
+		}
+		g.context.ctx.Enable(gl.DEPTH_TEST)
+		defer g.context.ctx.Disable(gl.DEPTH_TEST)
+
+		if destination.needs3DClear(g.frame) {
+			w, h := destination.viewportSizeForMode(drawMode)
+			g.context.ctx.Scissor(0, 0, int32(w), int32(h))
+			g.context.ctx.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+		}
+	}
 
 	if fillRule != graphicsdriver.FillRuleFillAll {
 		if err := destination.ensureStencilBuffer(); err != nil {
@@ -315,6 +347,18 @@ func (g *Graphics) NeedsClearingScreen() bool {
 
 func (g *Graphics) MaxImageSize() int {
 	return g.context.getMaxTextureSize()
+}
+
+func (g *Graphics) EnsureDepthForImage(imgID graphicsdriver.ImageID, width, height int) error {
+	img, ok := g.images[imgID]
+	if !ok {
+		return fmt.Errorf("opengl: image ID %d was not found when ensuring depth", imgID)
+	}
+	if width <= 0 || height <= 0 {
+		width, height = img.viewportSize()
+	}
+	img.depthBufferEnabled = true
+	return img.ensureDepthBufferSize(width, height)
 }
 
 func (g *Graphics) NewShader(program *shaderir.Program) (graphicsdriver.Shader, error) {
