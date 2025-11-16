@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"image"
 	"image/color"
 	"log"
 	"math"
@@ -168,15 +167,10 @@ type Game struct {
 	indices  []uint16
 	angle    float32
 	texture  *ebiten.Image
-	rt       *ebiten.Image
+	renderer *ebiten.Renderer3D
 }
 
 func NewGame() (*Game, error) {
-	shader, err := ebiten.NewShader([]byte(shaderSrc))
-	if err != nil {
-		return nil, err
-	}
-
 	tex, err := loadTexture()
 	if err != nil {
 		return nil, err
@@ -185,11 +179,15 @@ func NewGame() (*Game, error) {
 	tw, th := tex.Bounds().Dx(), tex.Bounds().Dy()
 	vertices, indices := buildCube(float32(tw), float32(th))
 
+	renderer3D := ebiten.NewRenderer3D()
+	renderer3D.ClearColor = color.RGBA{60, 20, 11, 255}
+	renderer3D.Clear = false
+
 	return &Game{
-		shader:   shader,
 		vertices: vertices,
 		indices:  indices,
 		texture:  tex,
+		renderer: renderer3D,
 	}, nil
 }
 
@@ -259,36 +257,17 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	screen.Fill(color.NRGBA{R: 62, G: 18, B: 31, A: 255})
-
-	width, height := screen.Size()
-	rt := g.ensureRenderTarget(width, height)
-	g.Draw3DMesh(rt)
-	screen.DrawImage(rt, nil)
-
+	g.renderer.Begin(screen)
+	g.Draw3DMesh()
+	g.renderer.End(screen)
 	ebitenutil.DebugPrint(screen, "Mesh example: rotating flat-shaded cube")
 }
 
-func (g *Game) ensureRenderTarget(width, height int) *ebiten.Image {
-	if g.rt != nil {
-		w, h := g.rt.Size()
-		if w == width && h == height {
-			return g.rt
-		}
-		g.rt.Dispose()
-	}
-	rt := ebiten.NewImageWithOptions(image.Rect(0, 0, width, height), &ebiten.NewImageOptions{Unmanaged: true})
-	rt.EnableDepthBuffer()
-	g.rt = rt
-	return g.rt
-}
-
-func (g *Game) Draw3DMesh(target *ebiten.Image) {
-	width, height := target.Size()
-	aspect := float32(width) / float32(height)
+func (g *Game) Draw3DMesh() {
+	aspect := g.renderer.Aspect()
 
 	proj := perspective(float32(math.Pi)/3, aspect, 0.1, 10)
-	view := lookAt(vec3{0, 0, 10}, vec3{0, 0, 0}, vec3{0, 1, 0})
+	view := lookAt(vec3{0, 0, 5}, vec3{0, 0, 0}, vec3{0, 1, 0})
 	rotY := rotate(g.angle, vec3{0, 1, 0.5})
 	model := rotY
 	//rotX := rotate(g.angle*0.5, vec3{1, 0, 0})
@@ -304,55 +283,16 @@ func (g *Game) Draw3DMesh(target *ebiten.Image) {
 		"LightDir": []float32{light.x, light.y, light.z},
 	}
 
-	opts := &ebiten.DrawTrianglesShaderOptions{
-		Uniforms:          uniforms,
-		RawDstCoordinates: true,
-		Images:            [4]*ebiten.Image{g.texture},
+	opts3d := &ebiten.DrawTriangles3DOptions{
+		Uniforms: uniforms,
+		Images:   [4]*ebiten.Image{g.texture},
 	}
-
-	//log.Printf("Vertices: %d Indices: %d", len(g.vertices), len(g.indices))
-	//log.Printf("MVP: %v", mvp.toSlice())
-	//log.Printf("Vertices: %v", g.vertices)
-	//for i, vertex := range g.vertices {
-	//	sceen := mvp.mulVec4(vec4{
-	//		x: vertex.Custom0,
-	//		y: vertex.Custom1,
-	//		z: vertex.Custom2,
-	//		w: vertex.Custom3,
-	//	})
-	//	log.Printf("Vertex %d: %v", i, sceen)
-	//}
-
-	target.DrawTrianglesShader(g.vertices, g.indices, g.shader, opts)
+	g.renderer.DrawTriangles3D(g.vertices, g.indices, opts3d)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return 640, 480
 }
-
-const shaderSrc = `
-package main
-
-var MVP mat4
-var LightDir vec3
-
-func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
-    pos := vec3(custom.x, custom.y, custom.z)
-    clip := MVP * vec4(pos, 1)
-    // Pass the normal through the color channel.
-    return clip, srcPos, color, custom
-}
-
-func Fragment(dstPos vec4, srcPos vec2, normal vec4, custom vec4) vec4 {
-    n := normalize(normal.xyz)
-    l := normalize(LightDir)
-    diff := max(dot(n, l), 0)
-    texel := imageSrc0At(srcPos)
-    base := texel.rgb
-    shaded := base * (0.2 + 0.8*diff)
-    return vec4(shaded, texel.a)
-}
-`
 
 func main() {
 	game, err := NewGame()
