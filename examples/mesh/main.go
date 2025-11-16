@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"math"
 
@@ -107,6 +108,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.Draw3DMesh()
 	g.renderer.End(screen)
 	ebitenutil.DebugPrint(screen, "Mesh example: rotating flat-shaded cube")
+	di := ebiten.DebugInfo{}
+	ebiten.ReadDebugInfo(&di)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Graphics library: %v", di.GraphicsLibrary), 0, 20)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("TPS: %0.2f\nFPS: %0.2f", ebiten.ActualTPS(), ebiten.ActualFPS()), 0, 40)
 }
 
 func (g *Game) Draw3DMesh() {
