@@ -1,193 +1,224 @@
-What’s biting you here is that you’ve taken over the *global* depth-stencil state in an engine that was built assuming “no depth at all, just painter’s algorithm + stencil for vector graphics”. So once you flip depth on for your 3D triangles, you’ve accidentally changed the rules for all the 2D stuff that comes after.
+# 3D Rendering
 
-Ebitengine *does* rely on stencil buffers internally for vector graphics and complex fills. Since v2.2 the vector API is implemented with stencil buffers, and v2.9 refined this with a custom stencil pass.([ebitengine.org][1]) If you’re hacking the depth/stencil attachment or state globally, you’re stepping directly on that codepath.
+This fork adds an experimental hardware-depth 3D path on top of Ebitengine's 2D renderer. The key idea is to render 3D content into an offscreen `*ebiten.Image` that owns a depth buffer, then composite that color image back into the normal 2D frame.
 
-Let me break it down and propose a way to structure your “3D mode” so it doesn’t pollute normal 2D rendering.
+The implementation is intentionally small: 3D is selected by the destination image, not by a global renderer mode. An image becomes a 3D render target when `EnableDepthBuffer` is called on it.
 
----
+## Basic Usage
 
-## What’s probably going wrong
+Use `Renderer3D` when you want the built-in prototype path:
 
-Likely one or more of these:
+```go
+type Game struct {
+	renderer *ebiten.Renderer3D
+	texture  *ebiten.Image
+	vertices []ebiten.Vertex
+	indices  []uint16
+}
 
-1. **You’re enabling depth test on the main render pass and not turning it off.**
-   Ebitengine’s regular quads/triangles now get depth-tested against whatever your 3D draw left in the depth buffer → sprites disappear or appear in the wrong order.
+func (g *Game) Draw(screen *ebiten.Image) {
+	g.renderer.Begin(screen)
+	g.drawWorld3D()
+	g.renderer.End(screen)
 
-2. **You’re changing the depth-stencil attachment that Ebitengine expects for 2D / vector graphics.**
-   Since vector fills use stencil operations, altering depth/stencil format or ops (e.g. non-default compare/op) will break those fills or cause “holes” in shapes.([ebitengine.org][1])
+	// Draw normal 2D UI after the 3D color target is composited.
+}
+```
 
-3. **You’re using the same depth-stencil texture for “3D depth” and “2D stencil”.**
-   Depth+stencil live in a *single* texture in the underlying APIs. If you start writing depth and changing depth-stencil state without coordinating with the stencil side, you get hard-to-debug interactions.
+`Begin(screen)` resizes the offscreen target to the screen size when needed and returns the 3D target. `End(screen)` draws that target onto `screen` with `DrawImage`. Set `Renderer3D.OffScreenBlitOptions` if the composite step needs a custom blend, transform, or color scale.
 
----
+The built-in `DrawTriangles3D` helper uses the internal shader in `renderer3d.go`:
 
-## High-level design that *won’t* mess up 2D
+```go
+uniforms := map[string]any{
+	"MVP":      mvp.toSlice(),
+	"NormalM":  normalM.toSlice(),
+	"LightDir": []float32{0, 0, 1},
+}
 
-Instead of globally flipping a “3D mode flag” on the main screen, treat 3D as **its own render pass with its own depth buffer**, then composite that back into the regular 2D pipeline.
+opts := &ebiten.DrawTriangles3DOptions{
+	Uniforms: uniforms,
+	Images:   [4]*ebiten.Image{texture},
+}
+renderer.DrawTriangles3D(vertices, indices, opts)
+```
 
-Conceptually:
+You can also draw directly into `renderer.Target()` or use `Renderer3D.DrawTrianglesShader` with your own shader. The target is an unmanaged image with a depth buffer attached.
 
-1. **3D pass** (offscreen, with depth+back-face culling)
-2. **2D pass** (the normal Ebitengine path, *no depth*)
+## Vertex Layout
+
+`DrawTriangles3D` uses the existing `ebiten.Vertex` fields as a compact 3D vertex format:
+
+* `Custom0`, `Custom1`, `Custom2`: object-space position `(x, y, z)`.
+* `Custom3`: currently unused by the built-in shader, but set it to `1` for consistency.
+* `ColorR`, `ColorG`, `ColorB`: object-space normal `(x, y, z)`.
+* `ColorA`: set to `1`.
+* `SrcX`, `SrcY`: texture coordinates in Ebitengine texel units.
+* `DstX`, `DstY`: ignored by the built-in 3D shader; examples set them to `0`.
+
+For custom shaders, `DrawTrianglesShader` preserves `Color*` and `Custom*` as arbitrary floating-point values. Unlike plain `DrawTriangles`, these fields are not converted into premultiplied color when using the shader path.
+
+## Shader Uniforms
+
+The built-in shader expects these uniforms:
+
+* `MVP mat4`: model-view-projection matrix. The vertex shader multiplies `MVP * vec4(position, 1)` and returns clip-space coordinates.
+* `NormalM mat4`: transforms object-space normals into the same space as `LightDir`. For a pure rotation model matrix, this is the model rotation. For non-uniform scaling, use the inverse transpose of the model matrix's linear 3x3 part, represented as a `mat4`.
+* `LightDir vec3`: vector from the shaded surface toward the light source. This is not the direction light rays travel. With the default camera, `vec3(0, 0, 1)` lights camera-facing surfaces.
+
+The shader samples `Images[0]` and applies simple diffuse lighting:
 
 ```text
-[Your 3D renderer] ──> color RT A + depth RT A
-                       ↓
-               Draw RT A as a normal Image onto screen
-               + all your usual 2D sprites / UI / vector stuff
+texel.rgb * (0.2 + 0.8 * max(dot(normal, LightDir), 0))
 ```
 
-That gives you:
+## Coordinate Convention
 
-* A real depth buffer and culling for 3D
-* Zero changes to how 2D uses stencil / blending / ordering
+The prototype 3D path uses a right-handed world/view convention, matching the math in `examples/mesh`:
 
-You can see a similar philosophy in Tetra3D, which piggybacks on Ebitengine but manages its own camera, matrices and depth buffer while still rendering via Ebitengine images and shaders.([GitHub][2])
+* `+X` points to the observer's right.
+* `+Y` points up.
+* `+Z` points toward the observer / camera.
+* `-Z` points away from the observer, into the scene.
 
----
+The default mesh camera is placed at `(0, 0, 5)` and looks at the origin, so it looks down the `-Z` axis. A cube face with normal `(0, 0, 1)` points toward that camera.
 
-## Concretely: how to structure the “3D mode”
+Matrices in `examples/mesh/math3d.go` are column-major. Matrix multiplication is written for column vectors, so transforms compose as `projection * view * model`.
 
-### 1. Separate render targets
+## How 3D Is Hooked Into Ebitengine
 
-Inside your fork / internal graphics layer, introduce a “3D render target”:
-
-* Color texture (same size as screen or whatever)
-* Depth-stencil texture (format suitable for depth, e.g. Depth24/32+Stencil)
-
-Use this **only** when 3D mode is enabled, not for the normal 2D draw pipeline.
-
-**3D mode flow:**
-
-1. End / flush any batched 2D draw calls.
-2. Begin a render pass on the 3D RT:
-
-    * `colorAttachment = color3D`
-    * `depthStencilAttachment = depth3D`
-    * `loadOp` for depth: clear to 1.0
-    * `storeOp`: store
-3. Use pipelines with:
-
-    * Depth test: enabled, compare: `LessEqual`
-    * Depth write: enabled
-    * Stencil: disabled or “keep” on all ops
-    * Cull mode: back
-4. Draw your 3D triangles.
-5. End that pass.
-
-Then, in your normal Ebitengine `Draw`:
-
-6. Draw `color3D` onto the main screen as a regular `*ebiten.Image`.
-7. Continue drawing all 2D sprites, tilemaps, vector graphics as usual (no depth).
-
-From the public API you can expose this as something like:
+The public API entry point is:
 
 ```go
-// pseudo
-type Renderer3D struct {
-    Target *ebiten.Image // the 3D color RT
-    // internal depth, pipelines, etc.
-}
-
-func (r *Renderer3D) Begin() { /* sets up 3D pass */ }
-func (r *Renderer3D) End()   { /* finishes 3D pass   */ }
-func (r *Renderer3D) DrawTriangles(verts []Vertex3D, idx []uint16) { ... }
+img := ebiten.NewImageWithOptions(rect, &ebiten.NewImageOptions{Unmanaged: true})
+img.EnableDepthBuffer()
 ```
 
-And in your game’s `Draw`:
+Important constraints:
+
+* Call `EnableDepthBuffer` only on non-sub-images.
+* Use an unmanaged image for 3D render targets so the image does not live in the shared atlas.
+* Depth support is backend-dependent; unsupported drivers can ignore the attach request.
+
+Internally the path is:
+
+1. `Image.EnableDepthBuffer` calls `ui.Image.EnableDepthBuffer`.
+2. `internal/graphicscommand.Image.EnableDepthBuffer` enqueues `enableDepthBufferCommand` and marks the command image as `depthBufferEnabled`.
+3. A depth-enabled destination image reports `graphicsdriver.DrawMode3D` from `drawMode()`.
+4. Draw commands carry that draw mode into `drawTrianglesCommand`.
+5. If the backend implements `graphicsdriver.DrawTrianglesWithMode`, the command queue calls `DrawTrianglesWithMode(..., DrawMode3D)`.
+6. If the backend implements `graphicsdriver.DepthTextureAttacher`, `enableDepthBufferCommand` calls `EnsureDepthForImage`.
+
+This keeps ordinary 2D draws on `DrawModeDefault` while draws into the 3D target get backend-specific depth state.
+
+## Draw Options That Matter
+
+`Renderer3D.DrawTriangles3D` creates `DrawTrianglesShaderOptions` with:
 
 ```go
-func (g *Game) Draw(screen *ebiten.Image) {
-    // 1) render 3D world into offscreen
-    g.renderer3D.Begin()
-    g.renderer3D.DrawWorld()
-    g.renderer3D.End()
-
-    // 2) composite into screen
-    screen.DrawImage(g.renderer3D.Target, nil)
-
-    // 3) draw HUD / 2D etc.
-    // all the usual 2D Ebiten calls
-}
+RawDstCoordinates: true
+Images:            opts.Images
+Uniforms:          opts.Uniforms
 ```
 
-No 2D code ever sees depth.
+`RawDstCoordinates` is important. It disables Ebitengine's sub-pixel adjustment for destination coordinates, which is correct when the vertex shader writes clip-space positions for 3D. If this is off, 3D geometry can be subtly shifted or distorted.
 
----
+The custom `ProjectionMatrix` option on `DrawTrianglesShaderOptions` is separate from the built-in 3D `MVP` uniform. The prototype shader currently carries its own projection through `MVP`, so callers generally leave `ProjectionMatrix` nil.
 
-### 2. Depth-stencil *state* separation
+## Backend Behavior
 
-If you *really* want to use depth on the main screen and not add an offscreen pass, you **must** guarantee:
+Metal and OpenGL currently implement the 3D mode hooks.
 
-* All **2D pipelines** have:
+Metal:
 
-    * `depthTest = disabled`
-    * `depthWrite = disabled`
-    * `stencilTest = disabled` or exactly matching what the vector-graphics code expects
-* All **3D pipelines** have depth enabled, but:
+* Implements `DepthTextureAttacher` and `DrawTrianglesWithMode`.
+* Allocates a dedicated depth texture for the destination image.
+* Uses a 3D render pass with color clear and depth clear.
+* Enables depth compare `LessEqual` and depth writes.
+* Uses logical image size for the 3D viewport instead of padded internal texture size.
+* Enables back-face culling with clockwise front-facing winding.
+* Rejects non-`FillRuleFillAll` 3D draws.
 
-    * stencil ops set to `KEEP` for all cases
-    * stencil test disabled
+OpenGL / WebGL:
 
-So your mode switch becomes:
+* Implements `DepthTextureAttacher` and `DrawTrianglesWithMode`.
+* Allocates a depth renderbuffer and attaches it to the destination framebuffer.
+* Enables `GL_DEPTH_TEST` for 3D draws and disables it afterward.
+* Clears color and depth once per frame for each 3D target.
+* Uses logical image size for the 3D viewport.
+* WebGL requests a context with `depth: true` and `stencil: true`.
+* Back-face culling is not currently enabled in the OpenGL 3D path.
 
-```go
-func enter3DMode() {
-    // switch to pipelines with depth on, stencil untouched
-}
+DirectX currently has depth-stencil resources for the normal rendering path, but it does not yet implement this 3D draw-mode plumbing in the same way as Metal/OpenGL. If you extend 3D support there, add `DrawTrianglesWithMode` and `DepthTextureAttacher` behavior rather than changing the default `DrawTriangles` path.
 
-func exit3DMode() {
-    // switch back to pipelines with depth off
-    // optionally clear depth to 1.0 so any accidental later depth use won’t matter
-}
+## Extending 3D Rendering
+
+When adding a new 3D feature, keep the separation between 2D and 3D explicit:
+
+* Add public options to `Renderer3D` or `DrawTriangles3DOptions` only when they map clearly to backend state or shader data.
+* Keep backend state changes scoped to `DrawMode3D`.
+* Do not enable depth testing globally.
+* Do not change stencil behavior used by vector rendering unless the change is also correct for normal 2D fills.
+* Prefer offscreen 3D targets and 2D composition over drawing depth-tested content directly to the screen.
+* Keep the default 2D batching path on `DrawModeDefault`.
+
+If you add backend state such as culling, depth compare functions, wireframe, or depth write toggles, update:
+
+* `internal/graphicsdriver/graphics.go` if the cross-backend contract changes.
+* `internal/graphicscommand` if commands need to carry new mode data.
+* Every backend that implements `DrawTrianglesWithMode`.
+* `Renderer3D` or `DrawTriangles3DOptions` if the option should be public.
+* `examples/mesh` or another small sample so behavior can be visually checked.
+
+## Troubleshooting
+
+If 2D sprites, UI, or vector graphics disappear after 3D rendering:
+
+* Check that the 3D draw target is offscreen and depth-enabled, not the final screen image.
+* Check that the backend disables depth testing after `DrawMode3D`.
+* Check that 2D draws still go through `DrawModeDefault`.
+* Check that stencil state is restored or isolated; vector fills rely on stencil.
+
+If 3D geometry appears shifted, stretched, or off-center:
+
+* Verify `RawDstCoordinates: true` for the 3D shader draw.
+* Verify the backend uses logical target size for 3D viewports, not padded internal texture size.
+* Verify the aspect ratio comes from `Renderer3D.Aspect()` after `Begin` has resized the target.
+
+If depth ordering is wrong:
+
+* Confirm `EnableDepthBuffer` is called on the render target before drawing.
+* Confirm the backend implements `DrawTrianglesWithMode`; otherwise the draw falls back to the normal 2D path without depth state.
+* Confirm the depth buffer is cleared at the start of the 3D pass or once per frame for the target.
+* Confirm clip-space `z` values are in the backend's expected range.
+
+If lighting rotates with the mesh:
+
+* Confirm normals are transformed by `NormalM` in the shader.
+* For pure rotations, pass the model rotation as `NormalM`.
+* For non-uniform scale, pass inverse-transpose normal data.
+* Confirm `LightDir` is in the same space as transformed normals.
+
+If the wrong side of a mesh is visible or culled:
+
+* Check triangle winding. The mesh example emits clockwise front faces for the current Metal culling setup.
+* Remember that OpenGL currently does not enable culling in 3D mode, so culling bugs might only appear on Metal.
+* Keep winding and cull mode consistent when adding OpenGL or DirectX culling.
+
+## Verification
+
+Useful checks while changing 3D rendering:
+
+```sh
+go build ./examples/mesh
+go test ./internal/graphicsdriver/opengl/...
+GOOS=js GOARCH=wasm go test ./internal/graphicsdriver/opengl
+GOOS=darwin go test ./internal/graphicsdriver/metal/...
 ```
 
-The catch: Ebitengine aggressively batches draw calls and caches pipelines, so mixing “2D pipeline state” and “3D pipeline state” in the same pass might fight with that batching model. The offscreen-pass approach is usually cleaner and easier to reason about.
+Manual verification is still important. Run `go run ./examples/mesh` and check that:
 
----
-
-### 3. Don’t fight the stencil
-
-Because vector graphics are implemented with stencil buffers and even-odd fills, touching stencil is dangerous:([ebitengine.org][1])
-
-* **Don’t** rely on the stencil aspect of the depth-stencil texture for your own purposes.
-* **Do** configure your 3D pipelines to:
-
-    * never write stencil (`writeMask = 0`)
-    * use stencil compare `ALWAYS` and ops `KEEP` if stencil is enabled at all.
-
-That way, you only use the depth aspect; you never clobber what 2D vector rendering wrote into stencil.
-
----
-
-## If you’d rather stay inside user-space (no engine fork)
-
-If you decide not to modify Ebitengine’s internals at all, your options are basically:
-
-1. **Software / shader depth buffer**
-   Use an extra `*ebiten.Image` as a “depth texture” and manually do depth tests in a shader (what Tetra3D does).([GitHub][2])
-
-    * Pros: no changes to engine; portable across all backends.
-    * Cons: more math in fragment shader, less efficient than hardware depth.
-
-2. **Use an existing 3D-on-Ebitengine lib**
-   Tetra3D already solved most of this (camera, matrices, depth handling, etc.) and still integrates naturally with 2D Ebitengine rendering. Looking at its source architecture might give you concrete patterns to borrow for your own experiment.
-
----
-
-## TL;DR: practical checklist
-
-* ✅ Don’t flip depth test “on globally” for the screen pass.
-* ✅ Do render 3D into its **own color+depth target**, then blit that as a 2D image.
-* ✅ Do use pipelines with depth test ON only for 3D, OFF for 2D.
-* ✅ Do leave stencil alone or in KEEP/disabled mode for 3D.
-* ✅ Do clear your 3D depth buffer when starting a 3D pass.
-
-If you want, next step I can help sketch actual code / internal API changes for:
-
-* the offscreen 3D target + depth buffer
-* simple camera + projection matrices
-* a “3D triangles” call that plays nice with Ebitengine’s batching model.
-
-[1]: https://ebitengine.org/en/documents/2.2.html?utm_source=chatgpt.com "Ebiten 2.2 Release Notes"
-[2]: https://github.com/SolarLune/tetra3d?utm_source=chatgpt.com "SolarLune/tetra3d"
+* The cube depth-sorts correctly as it rotates.
+* Lighting changes with face orientation when `LightDir` is fixed.
+* 2D debug text draws after the 3D pass.
+* Vector or other stencil-using 2D content still renders after the 3D composite.

@@ -123,11 +123,11 @@ func (g *Game) Draw3DMesh() {
 	model := rotY
 	mvp := mulMat4(proj, mulMat4(view, model))
 
-	light := normalize(vec3{0.5, -0.5, -0.3})
+	light := normalize(vec3{0, 0, 1})
 
 	uniforms := map[string]interface{}{
 		"MVP":      mvp.toSlice(),
-		"NormalM":  rotY.transpose().toSlice(),
+		"NormalM":  rotY.toSlice(),
 		"LightDir": []float32{light.x, light.y, light.z},
 	}
 

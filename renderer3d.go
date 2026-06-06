@@ -8,24 +8,24 @@ const shaderSrc = `
 package main
 
 var MVP mat4
+var NormalM mat4
 var LightDir vec3
 
 func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
-    pos := vec3(custom.x, custom.y, custom.z)
-    clip := MVP * vec4(pos, 1)
-    // Pass the normal through the color channel.
-    return clip, srcPos, color, custom
+	pos := vec3(custom.x, custom.y, custom.z)
+	clip := MVP * vec4(pos, 1)
+	normal := normalize((NormalM * vec4(color.xyz, 0)).xyz)
+	return clip, srcPos, vec4(normal, 1), custom
 }
 
 func Fragment(dstPos vec4, srcPos vec2, normal vec4, custom vec4) vec4 {
-    //n := normalize(normal.xyz)
-    //l := normalize(LightDir)
-    //diff := max(dot(n, l), 0)
-    texel := imageSrc0At(srcPos)
-    //base := texel.rgb
-    //shaded := base * (0.2 + 0.8*diff)
-    //return vec4(shaded, texel.a)
-	return vec4(texel)
+	n := normalize(normal.xyz)
+	l := normalize(LightDir)
+	diff := max(dot(n, l), 0)
+	texel := imageSrc0At(srcPos)
+	base := texel.rgb
+	shaded := base * (0.2 + 0.8*diff)
+	return vec4(shaded, texel.a)
 }
 `
 
