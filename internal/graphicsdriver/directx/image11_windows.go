@@ -32,9 +32,13 @@ type image11 struct {
 
 	texture            *_ID3D11Texture2D
 	stencil            *_ID3D11Texture2D
+	depthStencilWidth  int
+	depthStencilHeight int
 	renderTargetView   *_ID3D11RenderTargetView
 	stencilView        *_ID3D11DepthStencilView
 	shaderResourceView *_ID3D11ShaderResourceView
+	depthBufferEnabled bool
+	last3DClearFrame   int64
 }
 
 func (i *image11) internalSize() (int, int) {
@@ -62,6 +66,8 @@ func (i *image11) disposeBuffers() {
 		i.stencil.Release()
 		i.stencil = nil
 	}
+	i.depthStencilWidth = 0
+	i.depthStencilHeight = 0
 	if i.renderTargetView != nil {
 		i.renderTargetView.Release()
 		i.renderTargetView = nil
@@ -149,7 +155,7 @@ func (i *image11) WritePixels(args []graphicsdriver.PixelsArgs) error {
 	return nil
 }
 
-func (i *image11) setAsRenderTarget(useStencil bool) error {
+func (i *image11) setAsRenderTarget(useStencil bool, useDepth bool) error {
 	if i.renderTargetView == nil {
 		rtv, err := i.graphics.device.CreateRenderTargetView(unsafe.Pointer(i.texture), nil)
 		if err != nil {
@@ -158,36 +164,18 @@ func (i *image11) setAsRenderTarget(useStencil bool) error {
 		i.renderTargetView = rtv
 	}
 
-	if !useStencil {
+	if !useStencil && !useDepth {
 		i.graphics.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{i.renderTargetView}, nil)
 		return nil
 	}
 
 	if i.screen {
-		return fmt.Errorf("directx: a stencil buffer is not available for a screen image")
+		return fmt.Errorf("directx: a depth-stencil buffer is not available for a screen image")
 	}
 
-	if i.stencil == nil {
-		w, h := i.internalSize()
-		s, err := i.graphics.device.CreateTexture2D(&_D3D11_TEXTURE2D_DESC{
-			Width:     uint32(w),
-			Height:    uint32(h),
-			MipLevels: 0,
-			ArraySize: 1,
-			Format:    _DXGI_FORMAT_D24_UNORM_S8_UINT,
-			SampleDesc: _DXGI_SAMPLE_DESC{
-				Count:   1,
-				Quality: 0,
-			},
-			Usage:          _D3D11_USAGE_DEFAULT,
-			BindFlags:      uint32(_D3D11_BIND_DEPTH_STENCIL),
-			CPUAccessFlags: 0,
-			MiscFlags:      0,
-		}, nil)
-		if err != nil {
-			return err
-		}
-		i.stencil = s
+	w, h := i.internalSize()
+	if err := i.ensureDepthStencilBuffer(w, h); err != nil {
+		return err
 	}
 
 	if i.stencilView == nil {
@@ -199,9 +187,67 @@ func (i *image11) setAsRenderTarget(useStencil bool) error {
 	}
 
 	i.graphics.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{i.renderTargetView}, i.stencilView)
-	i.graphics.deviceContext.ClearDepthStencilView(i.stencilView, uint8(_D3D11_CLEAR_STENCIL), 0, 0)
+	if useDepth {
+		if i.needs3DClear(i.graphics.frame) {
+			i.graphics.deviceContext.ClearRenderTargetView(i.renderTargetView, [4]float32{})
+			i.graphics.deviceContext.ClearDepthStencilView(i.stencilView, uint8(_D3D11_CLEAR_DEPTH|_D3D11_CLEAR_STENCIL), 1, 0)
+		}
+	} else {
+		i.graphics.deviceContext.ClearDepthStencilView(i.stencilView, uint8(_D3D11_CLEAR_STENCIL), 0, 0)
+	}
 
 	return nil
+}
+
+func (i *image11) ensureDepthStencilBuffer(width, height int) error {
+	if i.screen {
+		return fmt.Errorf("directx: a depth-stencil buffer is not available for a screen image")
+	}
+	if width <= 0 || height <= 0 {
+		width, height = i.internalSize()
+	}
+	if i.stencil != nil && i.depthStencilWidth == width && i.depthStencilHeight == height {
+		return nil
+	}
+	if i.stencilView != nil {
+		i.stencilView.Release()
+		i.stencilView = nil
+	}
+	if i.stencil != nil {
+		i.stencil.Release()
+		i.stencil = nil
+	}
+	s, err := i.graphics.device.CreateTexture2D(&_D3D11_TEXTURE2D_DESC{
+		Width:     uint32(width),
+		Height:    uint32(height),
+		MipLevels: 0,
+		ArraySize: 1,
+		Format:    _DXGI_FORMAT_D24_UNORM_S8_UINT,
+		SampleDesc: _DXGI_SAMPLE_DESC{
+			Count:   1,
+			Quality: 0,
+		},
+		Usage:          _D3D11_USAGE_DEFAULT,
+		BindFlags:      uint32(_D3D11_BIND_DEPTH_STENCIL),
+		CPUAccessFlags: 0,
+		MiscFlags:      0,
+	}, nil)
+	if err != nil {
+		return err
+	}
+	i.stencil = s
+	i.depthStencilWidth = width
+	i.depthStencilHeight = height
+	i.last3DClearFrame = -1
+	return nil
+}
+
+func (i *image11) needs3DClear(frame int64) bool {
+	if i.last3DClearFrame == frame {
+		return false
+	}
+	i.last3DClearFrame = frame
+	return true
 }
 
 func (i *image11) getShaderResourceView() (*_ID3D11ShaderResourceView, error) {

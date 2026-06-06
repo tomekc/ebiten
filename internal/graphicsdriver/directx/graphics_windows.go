@@ -39,6 +39,7 @@ const (
 	incrementStencil
 	invertStencil
 	drawWithStencil
+	depth3D
 )
 
 const frameCount = 2

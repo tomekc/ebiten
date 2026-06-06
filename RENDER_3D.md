@@ -52,7 +52,7 @@ You can also draw directly into `renderer.Target()` or use `Renderer3D.DrawTrian
 * `Custom0`, `Custom1`, `Custom2`: object-space position `(x, y, z)`.
 * `Custom3`: currently unused by the built-in shader, but set it to `1` for consistency.
 * `ColorR`, `ColorG`, `ColorB`: object-space normal `(x, y, z)`.
-* `ColorA`: set to `1`.
+* `ColorA`: vertex alpha. The built-in shader multiplies the sampled texel alpha by this value and also scales RGB to keep the result premultiplied.
 * `SrcX`, `SrcY`: texture coordinates in Ebitengine texel units.
 * `DstX`, `DstY`: ignored by the built-in 3D shader; examples set them to `0`.
 
@@ -149,7 +149,15 @@ OpenGL / WebGL:
 * WebGL requests a context with `depth: true` and `stencil: true`.
 * Back-face culling is not currently enabled in the OpenGL 3D path.
 
-DirectX currently has depth-stencil resources for the normal rendering path, but it does not yet implement this 3D draw-mode plumbing in the same way as Metal/OpenGL. If you extend 3D support there, add `DrawTrianglesWithMode` and `DepthTextureAttacher` behavior rather than changing the default `DrawTriangles` path.
+DirectX:
+
+* Implements `DepthTextureAttacher` and `DrawTrianglesWithMode` for both Direct3D 11 and Direct3D 12.
+* Allocates a D24S8 depth-stencil resource for depth-enabled render targets.
+* Enables depth compare `LessEqual` and depth writes only for `DrawMode3D`.
+* Clears color and depth once per frame for each 3D target.
+* Uses logical image size for the 3D viewport.
+* Enables back-face culling with clockwise front-facing winding.
+* Rejects non-`FillRuleFillAll` 3D draws.
 
 ## Extending 3D Rendering
 

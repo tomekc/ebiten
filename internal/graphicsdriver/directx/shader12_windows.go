@@ -23,6 +23,7 @@ type pipelineStateKey struct {
 	blend       graphicsdriver.Blend
 	stencilMode stencilMode
 	screen      bool
+	drawMode    graphicsdriver.DrawMode
 }
 
 type shader12 struct {
@@ -67,17 +68,18 @@ func (s *shader12) disposeImpl() {
 	}
 }
 
-func (s *shader12) pipelineState(blend graphicsdriver.Blend, stencilMode stencilMode, screen bool) (*_ID3D12PipelineState, error) {
+func (s *shader12) pipelineState(blend graphicsdriver.Blend, stencilMode stencilMode, screen bool, drawMode graphicsdriver.DrawMode) (*_ID3D12PipelineState, error) {
 	key := pipelineStateKey{
 		blend:       blend,
 		stencilMode: stencilMode,
 		screen:      screen,
+		drawMode:    drawMode,
 	}
 	if state, ok := s.pipelineStates[key]; ok {
 		return state, nil
 	}
 
-	state, err := s.graphics.pipelineStates.newPipelineState(s.graphics.device, s.vertexShader, s.pixelShader, blend, stencilMode, screen)
+	state, err := s.graphics.pipelineStates.newPipelineState(s.graphics.device, s.vertexShader, s.pixelShader, blend, stencilMode, screen, drawMode)
 	if err != nil {
 		return nil, err
 	}

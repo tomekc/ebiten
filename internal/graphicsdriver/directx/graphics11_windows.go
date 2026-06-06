@@ -29,6 +29,11 @@ import (
 
 var inputElementDescsForDX11 []_D3D11_INPUT_ELEMENT_DESC
 
+var (
+	_ graphicsdriver.DepthTextureAttacher  = (*graphics11)(nil)
+	_ graphicsdriver.DrawTrianglesWithMode = (*graphics11)(nil)
+)
+
 func init() {
 	inputElementDescsForDX11 = []_D3D11_INPUT_ELEMENT_DESC{
 		{
@@ -164,9 +169,12 @@ type graphics11 struct {
 	indexBufferSizeInBytes uint32
 
 	rasterizerState    *_ID3D11RasterizerState
+	rasterizerState3D  *_ID3D11RasterizerState
 	samplerState       *_ID3D11SamplerState
 	blendStates        map[blendStateKey]*_ID3D11BlendState
 	depthStencilStates map[stencilMode]*_ID3D11DepthStencilState
+
+	frame int64
 
 	vsyncEnabled bool
 	window       windows.HWND
@@ -263,6 +271,24 @@ func newGraphics11(useWARP bool, useDebugLayer bool) (gr11 *graphics11, ferr err
 		g.rasterizerState = rs
 	}
 	g.deviceContext.RSSetState(g.rasterizerState)
+	if g.rasterizerState3D == nil {
+		rs, err := g.device.CreateRasterizerState(&_D3D11_RASTERIZER_DESC{
+			FillMode:              _D3D11_FILL_SOLID,
+			CullMode:              _D3D11_CULL_BACK,
+			FrontCounterClockwise: 0,
+			DepthBias:             0,
+			DepthBiasClamp:        0,
+			SlopeScaledDepthBias:  0,
+			DepthClipEnable:       1,
+			ScissorEnable:         1,
+			MultisampleEnable:     0,
+			AntialiasedLineEnable: 0,
+		})
+		if err != nil {
+			return nil, err
+		}
+		g.rasterizerState3D = rs
+	}
 
 	// Set the sampler state.
 	if g.samplerState == nil {
@@ -297,6 +323,7 @@ func (g *graphics11) End(present bool) error {
 	if !present {
 		return nil
 	}
+	g.frame++
 
 	if err := g.graphicsInfra.present(g.vsyncEnabled); err != nil {
 		return err
@@ -537,12 +564,28 @@ func (g *graphics11) removeShader(s *shader11) {
 }
 
 func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule) error {
+	return g.DrawTrianglesWithMode(dstID, srcIDs, shaderID, dstRegions, indexOffset, blend, uniforms, fillRule, graphicsdriver.DrawModeDefault)
+}
+
+func (g *graphics11) DrawTrianglesWithMode(dstID graphicsdriver.ImageID, srcIDs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule, mode graphicsdriver.DrawMode) error {
+	if shaderID == graphicsdriver.InvalidShaderID {
+		return fmt.Errorf("directx: shader ID is invalid")
+	}
+	if mode == graphicsdriver.DrawMode3D && fillRule != graphicsdriver.FillRuleFillAll {
+		return fmt.Errorf("directx: 3d draw does not support non FillAll rules")
+	}
+
 	// Remove bound textures first. This is needed to avoid warnings on the debugger.
 	g.deviceContext.OMSetRenderTargets([]*_ID3D11RenderTargetView{nil}, nil)
 	srvs := [graphics.ShaderSrcImageCount]*_ID3D11ShaderResourceView{}
 	g.deviceContext.PSSetShaderResources(0, srvs[:])
 
 	dst := g.images[dstID]
+	if mode == graphicsdriver.DrawMode3D {
+		if !dst.depthBufferEnabled {
+			return fmt.Errorf("directx: draw target must enable depth buffer for drawMode3D")
+		}
+	}
 	var srcs [graphics.ShaderSrcImageCount]*image11
 	for i, id := range srcIDs {
 		img := g.images[id]
@@ -553,6 +596,9 @@ func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphic
 	}
 
 	w, h := dst.internalSize()
+	if mode == graphicsdriver.DrawMode3D {
+		w, h = dst.width, dst.height
+	}
 	g.deviceContext.RSSetViewports([]_D3D11_VIEWPORT{
 		{
 			TopLeftX: 0,
@@ -563,8 +609,13 @@ func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphic
 			MaxDepth: 1,
 		},
 	})
+	if mode == graphicsdriver.DrawMode3D {
+		g.deviceContext.RSSetState(g.rasterizerState3D)
+	} else {
+		g.deviceContext.RSSetState(g.rasterizerState)
+	}
 
-	if err := dst.setAsRenderTarget(fillRule != graphicsdriver.FillRuleFillAll); err != nil {
+	if err := dst.setAsRenderTarget(fillRule != graphicsdriver.FillRuleFillAll, mode == graphicsdriver.DrawMode3D); err != nil {
 		return err
 	}
 
@@ -581,7 +632,11 @@ func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphic
 		}
 		g.deviceContext.OMSetBlendState(bs, nil, 0xffffffff)
 
-		dss, err := g.depthStencilState(noStencil)
+		dssMode := noStencil
+		if mode == graphicsdriver.DrawMode3D {
+			dssMode = depth3D
+		}
+		dss, err := g.depthStencilState(dssMode)
 		if err != nil {
 			return err
 		}
@@ -647,6 +702,18 @@ func (g *graphics11) DrawTriangles(dstID graphicsdriver.ImageID, srcIDs [graphic
 	return nil
 }
 
+func (g *graphics11) EnsureDepthForImage(imgID graphicsdriver.ImageID, width, height int) error {
+	img, ok := g.images[imgID]
+	if !ok {
+		return fmt.Errorf("directx: image ID %d was not found when ensuring depth", imgID)
+	}
+	if width <= 0 || height <= 0 {
+		width, height = img.internalSize()
+	}
+	img.depthBufferEnabled = true
+	return img.ensureDepthStencilBuffer(width, height)
+}
+
 func (g *graphics11) genNextImageID() graphicsdriver.ImageID {
 	g.nextImageID++
 	return g.nextImageID
@@ -659,7 +726,7 @@ func (g *graphics11) genNextShaderID() graphicsdriver.ShaderID {
 
 func (g *graphics11) blendState(blend graphicsdriver.Blend, stencilMode stencilMode) (*_ID3D11BlendState, error) {
 	var writeMask uint8
-	if stencilMode == noStencil || stencilMode == drawWithStencil {
+	if stencilMode == noStencil || stencilMode == drawWithStencil || stencilMode == depth3D {
 		writeMask = uint8(_D3D11_COLOR_WRITE_ENABLE_ALL)
 	}
 
@@ -736,6 +803,10 @@ func (g *graphics11) depthStencilState(mode stencilMode) (*_ID3D11DepthStencilSt
 		desc.StencilEnable = 1
 		desc.FrontFace.StencilFunc = _D3D11_COMPARISON_NOT_EQUAL
 		desc.BackFace.StencilFunc = _D3D11_COMPARISON_NOT_EQUAL
+	case depth3D:
+		desc.DepthEnable = 1
+		desc.DepthFunc = _D3D11_COMPARISON_LESS_EQUAL
+		desc.StencilWriteMask = 0
 	}
 
 	s, err := g.device.CreateDepthStencilState(desc)

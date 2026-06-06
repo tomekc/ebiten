@@ -15,7 +15,7 @@ func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4
 	pos := vec3(custom.x, custom.y, custom.z)
 	clip := MVP * vec4(pos, 1)
 	normal := normalize((NormalM * vec4(color.xyz, 0)).xyz)
-	return clip, srcPos, vec4(normal, 1), custom
+	return clip, srcPos, vec4(normal, color.a), custom
 }
 
 func Fragment(dstPos vec4, srcPos vec2, normal vec4, custom vec4) vec4 {
@@ -23,9 +23,10 @@ func Fragment(dstPos vec4, srcPos vec2, normal vec4, custom vec4) vec4 {
 	l := normalize(LightDir)
 	diff := max(dot(n, l), 0)
 	texel := imageSrc0At(srcPos)
+	alpha := texel.a * normal.a
 	base := texel.rgb
 	shaded := base * (0.2 + 0.8*diff)
-	return vec4(shaded, texel.a)
+	return vec4(shaded * normal.a, alpha)
 }
 `
 

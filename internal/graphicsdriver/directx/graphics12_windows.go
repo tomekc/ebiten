@@ -40,6 +40,11 @@ func (r *resourceWithSize) release() {
 	r.sizeInBytes = 0
 }
 
+var (
+	_ graphicsdriver.DepthTextureAttacher  = (*graphics12)(nil)
+	_ graphicsdriver.DrawTrianglesWithMode = (*graphics12)(nil)
+)
+
 type graphics12 struct {
 	debug              *_ID3D12Debug
 	device             *_ID3D12Device
@@ -82,6 +87,7 @@ type graphics12 struct {
 
 	frameIndex          int
 	prevBeginFrameIndex int
+	frame               int64
 
 	// frameStarted is true since Begin until End with present
 	frameStarted bool
@@ -697,6 +703,7 @@ func (g *graphics12) End(present bool) error {
 	g.pipelineStates.resetConstantBuffers(g.frameIndex)
 
 	if present {
+		g.frame++
 		if microsoftgdk.IsXbox() {
 			if err := g.presentXbox(); err != nil {
 				return err
@@ -1082,8 +1089,15 @@ func (g *graphics12) NewShader(program *shaderir.Program) (graphicsdriver.Shader
 }
 
 func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule) error {
+	return g.DrawTrianglesWithMode(dstID, srcs, shaderID, dstRegions, indexOffset, blend, uniforms, fillRule, graphicsdriver.DrawModeDefault)
+}
+
+func (g *graphics12) DrawTrianglesWithMode(dstID graphicsdriver.ImageID, srcs [graphics.ShaderSrcImageCount]graphicsdriver.ImageID, shaderID graphicsdriver.ShaderID, dstRegions []graphicsdriver.DstRegion, indexOffset int, blend graphicsdriver.Blend, uniforms []uint32, fillRule graphicsdriver.FillRule, mode graphicsdriver.DrawMode) error {
 	if shaderID == graphicsdriver.InvalidShaderID {
 		return fmt.Errorf("directx: shader ID is invalid")
+	}
+	if mode == graphicsdriver.DrawMode3D && fillRule != graphicsdriver.FillRuleFillAll {
+		return fmt.Errorf("directx: 3d draw does not support non FillAll rules")
 	}
 
 	if err := g.flushCommandList(g.copyCommandList); err != nil {
@@ -1103,6 +1117,11 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 	}
 
 	dst := g.images[dstID]
+	if mode == graphicsdriver.DrawMode3D {
+		if !dst.depthBufferEnabled {
+			return fmt.Errorf("directx: draw target must enable depth buffer for drawMode3D")
+		}
+	}
 	var resourceBarriers []_D3D12_RESOURCE_BARRIER_Transition
 	if rb, ok := dst.transiteState(_D3D12_RESOURCE_STATE_RENDER_TARGET); ok {
 		resourceBarriers = append(resourceBarriers, rb)
@@ -1124,7 +1143,7 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 		g.drawCommandList.ResourceBarrier(resourceBarriers)
 	}
 
-	if err := dst.setAsRenderTarget(g.drawCommandList, g.device, fillRule != graphicsdriver.FillRuleFillAll); err != nil {
+	if err := dst.setAsRenderTarget(g.drawCommandList, g.device, fillRule != graphicsdriver.FillRuleFillAll, mode == graphicsdriver.DrawMode3D); err != nil {
 		return err
 	}
 
@@ -1132,6 +1151,9 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 	g.tmpUniforms = appendAdjustedUniforms(g.tmpUniforms[:0], shader.uniformTypes, shader.uniformOffsets, uniforms)
 
 	w, h := dst.internalSize()
+	if mode == graphicsdriver.DrawMode3D {
+		w, h = dst.width, dst.height
+	}
 	g.needFlushDrawCommandList = true
 	g.drawCommandList.RSSetViewports([]_D3D12_VIEWPORT{
 		{
@@ -1157,11 +1179,23 @@ func (g *graphics12) DrawTriangles(dstID graphicsdriver.ImageID, srcs [graphics.
 		Format:         _DXGI_FORMAT_R32_UINT,
 	})
 
-	if err := g.pipelineStates.drawTriangles(g.device, g.drawCommandList, g.frameIndex, dst.screen, srcImages, shader, dstRegions, g.tmpUniforms, blend, indexOffset, fillRule); err != nil {
+	if err := g.pipelineStates.drawTriangles(g.device, g.drawCommandList, g.frameIndex, dst.screen, srcImages, shader, dstRegions, g.tmpUniforms, blend, indexOffset, fillRule, mode); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (g *graphics12) EnsureDepthForImage(imgID graphicsdriver.ImageID, width, height int) error {
+	img, ok := g.images[imgID]
+	if !ok {
+		return fmt.Errorf("directx: image ID %d was not found when ensuring depth", imgID)
+	}
+	if width <= 0 || height <= 0 {
+		width, height = img.internalSize()
+	}
+	img.depthBufferEnabled = true
+	return img.ensureDepthStencilView(g.device, width, height)
 }
 
 func (g *graphics12) genNextImageID() graphicsdriver.ImageID {

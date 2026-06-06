@@ -969,6 +969,13 @@ func (i *_ID3D11DeviceContext) ClearDepthStencilView(pDepthStencilView *_ID3D11D
 	runtime.KeepAlive(pDepthStencilView)
 }
 
+func (i *_ID3D11DeviceContext) ClearRenderTargetView(pRenderTargetView *_ID3D11RenderTargetView, colorRGBA [4]float32) {
+	_, _, _ = syscall.Syscall(i.vtbl.ClearRenderTargetView, 3, uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(pRenderTargetView)), uintptr(unsafe.Pointer(&colorRGBA[0])))
+	runtime.KeepAlive(pRenderTargetView)
+	runtime.KeepAlive(colorRGBA)
+}
+
 func (i *_ID3D11DeviceContext) CopySubresourceRegion(pDstResource unsafe.Pointer, dstSubresource uint32, dstX uint32, dstY uint32, dstZ uint32, pSrcResource unsafe.Pointer, srcSubresource uint32, pSrcBox *_D3D11_BOX) {
 	_, _, _ = syscall.Syscall9(i.vtbl.CopySubresourceRegion, 9, uintptr(unsafe.Pointer(i)),
 		uintptr(pDstResource), uintptr(dstSubresource), uintptr(dstX),

@@ -80,7 +80,7 @@ func buildCube(texWidth, texHeight float32) ([]ebiten.Vertex, []uint16) {
 				ColorR:  normal.x,
 				ColorG:  normal.y,
 				ColorB:  normal.z,
-				ColorA:  1,
+				ColorA:  0.5,
 				Custom0: p.x,
 				Custom1: p.y,
 				Custom2: p.z,

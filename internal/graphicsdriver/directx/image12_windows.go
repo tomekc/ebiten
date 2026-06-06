@@ -31,11 +31,15 @@ type image12 struct {
 	height   int
 	screen   bool
 
-	states            [frameCount]_D3D12_RESOURCE_STATES
-	texture           *_ID3D12Resource
-	stencil           *_ID3D12Resource
-	rtvDescriptorHeap *_ID3D12DescriptorHeap
-	dsvDescriptorHeap *_ID3D12DescriptorHeap
+	states             [frameCount]_D3D12_RESOURCE_STATES
+	texture            *_ID3D12Resource
+	stencil            *_ID3D12Resource
+	depthStencilWidth  int
+	depthStencilHeight int
+	rtvDescriptorHeap  *_ID3D12DescriptorHeap
+	dsvDescriptorHeap  *_ID3D12DescriptorHeap
+	depthBufferEnabled bool
+	last3DClearFrame   int64
 
 	uploadingStagingBuffers []*_ID3D12Resource
 }
@@ -62,6 +66,8 @@ func (i *image12) disposeImpl() {
 		i.stencil.Release()
 		i.stencil = nil
 	}
+	i.depthStencilWidth = 0
+	i.depthStencilHeight = 0
 	if i.texture != nil {
 		i.texture.Release()
 		i.texture = nil
@@ -288,14 +294,14 @@ func (i *image12) internalSize() (int, int) {
 	return graphics.InternalImageSize(i.width), graphics.InternalImageSize(i.height)
 }
 
-func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList, device *_ID3D12Device, useStencil bool) error {
+func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList, device *_ID3D12Device, useStencil bool, useDepth bool) error {
 	if err := i.ensureRenderTargetView(device); err != nil {
 		return err
 	}
 
 	if i.screen {
-		if useStencil {
-			return fmt.Errorf("directx: stencils are not available on the screen framebuffer")
+		if useStencil || useDepth {
+			return fmt.Errorf("directx: depth-stencils are not available on the screen framebuffer")
 		}
 		rtv, err := i.graphics.rtvDescriptorHeap.GetCPUDescriptorHandleForHeapStart()
 		if err != nil {
@@ -311,12 +317,13 @@ func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList,
 		return err
 	}
 
-	if !useStencil {
+	if !useStencil && !useDepth {
 		drawCommandList.OMSetRenderTargets([]_D3D12_CPU_DESCRIPTOR_HANDLE{rtv}, false, nil)
 		return nil
 	}
 
-	if err := i.ensureDepthStencilView(device); err != nil {
+	w, h := i.internalSize()
+	if err := i.ensureDepthStencilView(device, w, h); err != nil {
 		return err
 	}
 	dsv, err := i.dsvDescriptorHeap.GetCPUDescriptorHandleForHeapStart()
@@ -325,7 +332,14 @@ func (i *image12) setAsRenderTarget(drawCommandList *_ID3D12GraphicsCommandList,
 	}
 	drawCommandList.OMSetStencilRef(0)
 	drawCommandList.OMSetRenderTargets([]_D3D12_CPU_DESCRIPTOR_HANDLE{rtv}, false, &dsv)
-	drawCommandList.ClearDepthStencilView(dsv, _D3D12_CLEAR_FLAG_STENCIL, 0, 0, nil)
+	if useDepth {
+		if i.needs3DClear(i.graphics.frame) {
+			drawCommandList.ClearRenderTargetView(rtv, [4]float32{}, nil)
+			drawCommandList.ClearDepthStencilView(dsv, _D3D12_CLEAR_FLAG_DEPTH|_D3D12_CLEAR_FLAG_STENCIL, 1, 0, nil)
+		}
+	} else {
+		drawCommandList.ClearDepthStencilView(dsv, _D3D12_CLEAR_FLAG_STENCIL, 0, 0, nil)
+	}
 
 	return nil
 }
@@ -359,25 +373,35 @@ func (i *image12) ensureRenderTargetView(device *_ID3D12Device) error {
 	return nil
 }
 
-func (i *image12) ensureDepthStencilView(device *_ID3D12Device) error {
+func (i *image12) ensureDepthStencilView(device *_ID3D12Device, width, height int) error {
 	if i.screen {
 		return fmt.Errorf("directx: stencils are not available on the screen framebuffer")
 	}
 
-	if i.dsvDescriptorHeap != nil {
-		return nil
+	if width <= 0 || height <= 0 {
+		width, height = i.internalSize()
+	}
+	if i.stencil != nil && (i.depthStencilWidth != width || i.depthStencilHeight != height) {
+		if i.dsvDescriptorHeap != nil {
+			i.dsvDescriptorHeap.Release()
+			i.dsvDescriptorHeap = nil
+		}
+		i.stencil.Release()
+		i.stencil = nil
 	}
 
-	h, err := device.CreateDescriptorHeap(&_D3D12_DESCRIPTOR_HEAP_DESC{
-		Type:           _D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
-		NumDescriptors: 1,
-		Flags:          _D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-		NodeMask:       0,
-	})
-	if err != nil {
-		return err
+	if i.dsvDescriptorHeap == nil {
+		h, err := device.CreateDescriptorHeap(&_D3D12_DESCRIPTOR_HEAP_DESC{
+			Type:           _D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+			NumDescriptors: 1,
+			Flags:          _D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+			NodeMask:       0,
+		})
+		if err != nil {
+			return err
+		}
+		i.dsvDescriptorHeap = h
 	}
-	i.dsvDescriptorHeap = h
 
 	dsv, err := i.dsvDescriptorHeap.GetCPUDescriptorHandleForHeapStart()
 	if err != nil {
@@ -393,8 +417,8 @@ func (i *image12) ensureDepthStencilView(device *_ID3D12Device) error {
 		}, _D3D12_HEAP_FLAG_NONE, &_D3D12_RESOURCE_DESC{
 			Dimension:        _D3D12_RESOURCE_DIMENSION_TEXTURE2D,
 			Alignment:        0,
-			Width:            uint64(graphics.InternalImageSize(i.width)),
-			Height:           uint32(graphics.InternalImageSize(i.height)),
+			Width:            uint64(width),
+			Height:           uint32(height),
 			DepthOrArraySize: 1,
 			MipLevels:        0,
 			Format:           _DXGI_FORMAT_D24_UNORM_S8_UINT,
@@ -406,15 +430,27 @@ func (i *image12) ensureDepthStencilView(device *_ID3D12Device) error {
 			Flags:  _D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
 		}, _D3D12_RESOURCE_STATE_DEPTH_WRITE, &_D3D12_CLEAR_VALUE{
 			Format: _DXGI_FORMAT_D24_UNORM_S8_UINT,
+			Color:  [4]float32{1},
 		})
 		if err != nil {
 			return err
 		}
 		i.stencil = s
+		i.depthStencilWidth = width
+		i.depthStencilHeight = height
+		i.last3DClearFrame = -1
 	}
 	device.CreateDepthStencilView(i.stencil, nil, dsv)
 
 	return nil
+}
+
+func (i *image12) needs3DClear(frame int64) bool {
+	if i.last3DClearFrame == frame {
+		return false
+	}
+	i.last3DClearFrame = frame
+	return true
 }
 
 func (i *image12) releaseUploadingStagingBuffers() {
