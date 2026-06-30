@@ -3,13 +3,32 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"image/color"
 	"log"
 	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	res "github.com/hajimehoshi/ebiten/v2/examples/resources/images/shader"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
+
+type renderMode int
+
+const (
+	renderModeTextured renderMode = iota
+	renderModeWireframe
+)
+
+func (m renderMode) String() string {
+	switch m {
+	case renderModeWireframe:
+		return "wireframe"
+	default:
+		return "textured"
+	}
+}
 
 type Game struct {
 	vertices []ebiten.Vertex
@@ -17,6 +36,7 @@ type Game struct {
 	angle    float32
 	texture  *ebiten.Image
 	renderer *ebiten.Renderer3D
+	mode     renderMode
 }
 
 func NewGame() (*Game, error) {
@@ -100,18 +120,30 @@ func buildCube(texWidth, texHeight float32) ([]ebiten.Vertex, []uint16) {
 
 func (g *Game) Update() error {
 	g.angle += 0.02
+	if inpututil.IsKeyJustPressed(ebiten.Key1) {
+		g.mode = renderModeTextured
+	}
+	if inpututil.IsKeyJustPressed(ebiten.Key2) {
+		g.mode = renderModeWireframe
+	}
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.renderer.Begin(screen)
-	g.Draw3DMesh()
-	g.renderer.End(screen)
-	ebitenutil.DebugPrint(screen, "Mesh example: rotating flat-shaded cube")
+	switch g.mode {
+	case renderModeWireframe:
+		g.DrawWireframe(screen)
+	default:
+		g.renderer.Begin(screen)
+		g.Draw3DMesh()
+		g.renderer.End(screen)
+	}
+
+	ebitenutil.DebugPrint(screen, fmt.Sprintf("Mesh example: rotating cube\n1: textured  2: wireframe\nMode: %s", g.mode))
 	di := ebiten.DebugInfo{}
 	ebiten.ReadDebugInfo(&di)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Graphics library: %v", di.GraphicsLibrary), 0, 20)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("TPS: %0.2f\nFPS: %0.2f", ebiten.ActualTPS(), ebiten.ActualFPS()), 0, 40)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Graphics library: %v", di.GraphicsLibrary), 0, 60)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("TPS: %0.2f\nFPS: %0.2f", ebiten.ActualTPS(), ebiten.ActualFPS()), 0, 80)
 }
 
 func (g *Game) Draw3DMesh() {
@@ -136,6 +168,44 @@ func (g *Game) Draw3DMesh() {
 		Images:   [4]*ebiten.Image{g.texture},
 	}
 	g.renderer.DrawTriangles3D(g.vertices, g.indices, opts3d)
+}
+
+func (g *Game) DrawWireframe(screen *ebiten.Image) {
+	w, h := float32(screen.Bounds().Dx()), float32(screen.Bounds().Dy())
+	aspect := w / h
+
+	proj := perspective(float32(math.Pi)/3, aspect, 0.1, 10)
+	view := lookAt(vec3{0, 0, 5}, vec3{0, 0, 0}, vec3{0, 1, 0})
+	model := rotate(g.angle, vec3{0, 1, 0.5})
+	mvp := mulMat4(proj, mulMat4(view, model))
+
+	corners := []vec3{
+		{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
+		{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1},
+	}
+	edges := [][2]int{
+		{0, 1}, {1, 2}, {2, 3}, {3, 0},
+		{4, 5}, {5, 6}, {6, 7}, {7, 4},
+		{0, 4}, {1, 5}, {2, 6}, {3, 7},
+	}
+
+	project := func(p vec3) (float32, float32, bool) {
+		clip := mvp.mulVec4(vec4{p.x, p.y, p.z, 1})
+		if clip.w <= 0 {
+			return 0, 0, false
+		}
+		ndcX := clip.x / clip.w
+		ndcY := clip.y / clip.w
+		return (ndcX + 1) * 0.5 * w, (1 - ndcY) * 0.5 * h, true
+	}
+
+	for _, e := range edges {
+		x0, y0, ok0 := project(corners[e[0]])
+		x1, y1, ok1 := project(corners[e[1]])
+		if ok0 && ok1 {
+			vector.StrokeLine(screen, x0, y0, x1, y1, 2, color.White, true)
+		}
+	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
