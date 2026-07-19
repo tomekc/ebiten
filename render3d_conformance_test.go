@@ -201,9 +201,6 @@ func TestRender3D_Winding(t *testing.T) {
 // interleaved draw to a different image within the same frame. (Backends
 // must clear a 3D target once per frame, not once per render pass.)
 func TestRender3D_InterleavedDraws(t *testing.T) {
-	if lib := conf3DGraphicsLibrary(); lib == ebiten.GraphicsLibraryMetal {
-		t.Skip("Metal clears 3D targets per render pass, wiping earlier draws (fork task A4)")
-	}
 	s := conf3DShader(t)
 	dst := newConf3DTarget(64, 64)
 	other := ebiten.NewImage(16, 16)

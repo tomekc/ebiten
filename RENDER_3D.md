@@ -109,6 +109,11 @@ projection matrix that emits z in `[0, w]`, like `examples/mesh`'s
 it per backend with `go test -run TestRender3D .` and
 `EBITENGINE_GRAPHICS_LIBRARY=opengl go test -run TestRender3D .`.
 
+Conformance status (darwin, 2026-07): all six tests pass on Metal and
+OpenGL. DirectX implements the same contract natively (frame-tracked clears
+in both D3D11 and D3D12) but has not run on Windows hardware yet; WebGL
+shares the OpenGL code paths and the wasm build compiles.
+
 ## How 3D Is Hooked Into Ebitengine
 
 The public API entry point is:
@@ -157,7 +162,10 @@ Metal:
 
 * Implements `DepthTextureAttacher` and `DrawTrianglesWithMode`.
 * Allocates a dedicated depth texture for the destination image.
-* Uses a 3D render pass with color clear and depth clear.
+* Clears color and depth once per frame for each 3D target, at its first 3D
+  draw; later render passes on the target within the frame load the stored
+  color and depth, so interleaved draws to other images cannot wipe earlier
+  3D content.
 * Enables depth compare `LessEqual` and depth writes.
 * Uses logical image size for the 3D viewport instead of padded internal texture size.
 * Enables back-face culling with clockwise front-facing winding.

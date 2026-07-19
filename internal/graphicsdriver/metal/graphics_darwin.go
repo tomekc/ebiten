@@ -330,11 +330,12 @@ func (g *Graphics) NewImage(width, height int) (graphicsdriver.Image, error) {
 	}
 	t := g.view.getMTLDevice().NewTextureWithDescriptor(td)
 	i := &Image{
-		id:       g.genNextImageID(),
-		graphics: g,
-		width:    width,
-		height:   height,
-		texture:  t,
+		id:               g.genNextImageID(),
+		graphics:         g,
+		width:            width,
+		height:           height,
+		texture:          t,
+		last3DClearFrame: -1,
 	}
 	g.addImage(i)
 	return i, nil
@@ -343,11 +344,12 @@ func (g *Graphics) NewImage(width, height int) (graphicsdriver.Image, error) {
 func (g *Graphics) NewScreenFramebufferImage(width, height int) (graphicsdriver.Image, error) {
 	g.view.setDrawableSize(width, height)
 	i := &Image{
-		id:       g.genNextImageID(),
-		graphics: g,
-		width:    width,
-		height:   height,
-		screen:   true,
+		id:               g.genNextImageID(),
+		graphics:         g,
+		width:            width,
+		height:           height,
+		screen:           true,
+		last3DClearFrame: -1,
 	}
 	g.addImage(i)
 	return i, nil
@@ -577,7 +579,13 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 	if g.rce == (mtl.RenderCommandEncoder{}) {
 		rpd := mtl.RenderPassDescriptor{}
 		colorLoad := mtl.LoadActionLoad
-		if dst.screen || drawMode == graphicsdriver.DrawMode3D {
+		// A 3D target's color and depth are cleared once per frame, at its
+		// first 3D draw. Later render passes on the same target within the
+		// frame load the previous contents (and the stored depth), so an
+		// interleaved draw to another image cannot wipe earlier 3D content.
+		// This mirrors the OpenGL and DirectX backends.
+		clear3D := drawMode == graphicsdriver.DrawMode3D && dst.needs3DClear(g.frame)
+		if dst.screen || clear3D {
 			colorLoad = mtl.LoadActionClear
 		}
 		rpd.ColorAttachments[0].LoadAction = colorLoad
@@ -593,8 +601,12 @@ func (g *Graphics) draw(dst *Image, dstRegions []graphicsdriver.DstRegion, srcs 
 		rpd.ColorAttachments[0].ClearColor = mtl.ClearColor{}
 
 		if drawMode == graphicsdriver.DrawMode3D {
-			rpd.DepthAttachment.LoadAction = mtl.LoadActionClear
-			rpd.DepthAttachment.StoreAction = mtl.StoreActionDontCare
+			if clear3D {
+				rpd.DepthAttachment.LoadAction = mtl.LoadActionClear
+			} else {
+				rpd.DepthAttachment.LoadAction = mtl.LoadActionLoad
+			}
+			rpd.DepthAttachment.StoreAction = mtl.StoreActionStore
 			rpd.DepthAttachment.Texture = dst.depth
 			rpd.DepthAttachment.ClearDepth = 1
 		}
@@ -878,6 +890,21 @@ type Image struct {
 	texture  mtl.Texture
 	stencil  mtl.Texture
 	depth    mtl.Texture
+
+	// last3DClearFrame is the frame number of the last 3D color+depth
+	// clear, so a 3D target is cleared once per frame at its first 3D draw
+	// (mirroring the OpenGL and DirectX backends). -1 means never cleared.
+	last3DClearFrame int64
+}
+
+// needs3DClear reports whether the image still needs its once-per-frame 3D
+// clear, and marks it done for this frame.
+func (i *Image) needs3DClear(frame int64) bool {
+	if i.last3DClearFrame != frame {
+		i.last3DClearFrame = frame
+		return true
+	}
+	return false
 }
 
 func (i *Image) ID() graphicsdriver.ImageID {
