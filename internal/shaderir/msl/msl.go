@@ -135,6 +135,11 @@ func Compile(p *shaderir.Program) (shader string) {
 			lines = append(lines, fmt.Sprintf("\ttexture2d<float> T%[1]d [[texture(%[1]d)]]", i))
 		}
 		lines[len(lines)-1] += ") {"
+		// User-defined functions unconditionally take a front_facing
+		// parameter ([[front_facing]] is fragment-only). Vertex-stage calls
+		// pass this dummy so helpers shared with the fragment stage compile;
+		// frontFacing() has no meaning in a vertex function anyway.
+		lines = append(lines, "\tconst bool front_facing = false;")
 		lines = append(lines, fmt.Sprintf("\tVaryings %s = {};", vertexOut))
 		lines = append(lines, c.block(p, p.VertexFunc.Block, p.VertexFunc.Block, 0)...)
 		if last := fmt.Sprintf("\treturn %s;", vertexOut); lines[len(lines)-1] != last {

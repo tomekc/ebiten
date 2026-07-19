@@ -59,6 +59,9 @@ func hlslNormalize(str string, prelude string) string {
 func metalNormalize(str string) string {
 	prelude := msl.Prelude(shaderir.Texels)
 	str = strings.TrimPrefix(str, prelude)
+	// The vertex entry declares a dummy front_facing for user-function calls
+	// (fragment-only builtin); strip it so goldens stay stage-agnostic.
+	str = strings.ReplaceAll(str, "\tconst bool front_facing = false;\n", "")
 	return strings.TrimSpace(str)
 }
 
