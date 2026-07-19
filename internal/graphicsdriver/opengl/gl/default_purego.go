@@ -52,8 +52,10 @@ type defaultContext struct {
 	gpDisable                  uintptr
 	gpDisableVertexAttribArray uintptr
 	gpDrawElements             uintptr
+	gpCullFace                 uintptr
 	gpEnable                   uintptr
 	gpEnableVertexAttribArray  uintptr
+	gpFrontFace                uintptr
 	gpFlush                    uintptr
 	gpFramebufferRenderbuffer  uintptr
 	gpFramebufferTexture2D     uintptr
@@ -267,6 +269,10 @@ func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, of
 	purego.SyscallN(c.gpDrawElements, uintptr(mode), uintptr(count), uintptr(xtype), uintptr(offset))
 }
 
+func (c *defaultContext) CullFace(mode uint32) {
+	purego.SyscallN(c.gpCullFace, uintptr(mode))
+}
+
 func (c *defaultContext) Enable(cap uint32) {
 	purego.SyscallN(c.gpEnable, uintptr(cap))
 }
@@ -277,6 +283,10 @@ func (c *defaultContext) EnableVertexAttribArray(index uint32) {
 
 func (c *defaultContext) Flush() {
 	purego.SyscallN(c.gpFlush)
+}
+
+func (c *defaultContext) FrontFace(dir uint32) {
+	purego.SyscallN(c.gpFrontFace, uintptr(dir))
 }
 
 func (c *defaultContext) FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32) {
@@ -500,8 +510,10 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpDisable = g.get("glDisable")
 	c.gpDisableVertexAttribArray = g.get("glDisableVertexAttribArray")
 	c.gpDrawElements = g.get("glDrawElements")
+	c.gpCullFace = g.get("glCullFace")
 	c.gpEnable = g.get("glEnable")
 	c.gpEnableVertexAttribArray = g.get("glEnableVertexAttribArray")
+	c.gpFrontFace = g.get("glFrontFace")
 	c.gpFlush = g.get("glFlush")
 	c.gpFramebufferRenderbuffer = g.get("glFramebufferRenderbuffer")
 	c.gpFramebufferTexture2D = g.get("glFramebufferTexture2D")

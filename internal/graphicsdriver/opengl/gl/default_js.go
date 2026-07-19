@@ -53,8 +53,10 @@ type defaultContext struct {
 	fnDisable                  js.Value
 	fnDisableVertexAttribArray js.Value
 	fnDrawElements             js.Value
+	fnCullFace                 js.Value
 	fnEnable                   js.Value
 	fnEnableVertexAttribArray  js.Value
+	fnFrontFace                js.Value
 	fnFramebufferRenderbuffer  js.Value
 	fnFramebufferTexture2D     js.Value
 	fnFlush                    js.Value
@@ -182,8 +184,10 @@ func NewDefaultContext(v js.Value) (Context, error) {
 		fnDisable:                  v.Get("disable").Call("bind", v),
 		fnDisableVertexAttribArray: v.Get("disableVertexAttribArray").Call("bind", v),
 		fnDrawElements:             v.Get("drawElements").Call("bind", v),
+		fnCullFace:                 v.Get("cullFace").Call("bind", v),
 		fnEnable:                   v.Get("enable").Call("bind", v),
 		fnEnableVertexAttribArray:  v.Get("enableVertexAttribArray").Call("bind", v),
+		fnFrontFace:                v.Get("frontFace").Call("bind", v),
 		fnFramebufferRenderbuffer:  v.Get("framebufferRenderbuffer").Call("bind", v),
 		fnFramebufferTexture2D:     v.Get("framebufferTexture2D").Call("bind", v),
 		fnFlush:                    v.Get("flush").Call("bind", v),
@@ -384,6 +388,10 @@ func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, of
 	c.fnDrawElements.Invoke(mode, count, xtype, offset)
 }
 
+func (c *defaultContext) CullFace(mode uint32) {
+	c.fnCullFace.Invoke(mode)
+}
+
 func (c *defaultContext) Enable(cap uint32) {
 	c.fnEnable.Invoke(cap)
 }
@@ -394,6 +402,10 @@ func (c *defaultContext) EnableVertexAttribArray(index uint32) {
 
 func (c *defaultContext) Flush() {
 	c.fnFlush.Invoke()
+}
+
+func (c *defaultContext) FrontFace(dir uint32) {
+	c.fnFrontFace.Invoke(dir)
 }
 
 func (c *defaultContext) FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32) {

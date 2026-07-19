@@ -221,6 +221,14 @@ func (d *DebugContext) CreateVertexArray() uint32 {
 	return out0
 }
 
+func (d *DebugContext) CullFace(arg0 uint32) {
+	d.Context.CullFace(arg0)
+	fmt.Fprintln(os.Stderr, "CullFace")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at CullFace", e))
+	}
+}
+
 func (d *DebugContext) DeleteBuffer(arg0 uint32) {
 	d.Context.DeleteBuffer(arg0)
 	fmt.Fprintln(os.Stderr, "DeleteBuffer")
@@ -338,6 +346,14 @@ func (d *DebugContext) FramebufferTexture2D(arg0 uint32, arg1 uint32, arg2 uint3
 	fmt.Fprintln(os.Stderr, "FramebufferTexture2D")
 	if e := d.Context.GetError(); e != NO_ERROR {
 		panic(fmt.Sprintf("gl: GetError() returned %d at FramebufferTexture2D", e))
+	}
+}
+
+func (d *DebugContext) FrontFace(arg0 uint32) {
+	d.Context.FrontFace(arg0)
+	fmt.Fprintln(os.Stderr, "FrontFace")
+	if e := d.Context.GetError(); e != NO_ERROR {
+		panic(fmt.Sprintf("gl: GetError() returned %d at FrontFace", e))
 	}
 }
 

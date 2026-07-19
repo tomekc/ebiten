@@ -216,11 +216,25 @@ package gl
 //   ((fn)(fnptr))(mode, count, type, indices);
 // }
 //
+// #cgo noescape glowCullFace
+// #cgo nocallback glowCullFace
+// static void glowCullFace(uintptr_t fnptr, GLenum mode) {
+//   typedef void (*fn)(GLenum mode);
+//   ((fn)(fnptr))(mode);
+// }
+//
 // #cgo noescape glowEnable
 // #cgo nocallback glowEnable
 // static void glowEnable(uintptr_t fnptr, GLenum cap) {
 //   typedef void (*fn)(GLenum cap);
 //   ((fn)(fnptr))(cap);
+// }
+//
+// #cgo noescape glowFrontFace
+// #cgo nocallback glowFrontFace
+// static void glowFrontFace(uintptr_t fnptr, GLenum dir) {
+//   typedef void (*fn)(GLenum dir);
+//   ((fn)(fnptr))(dir);
 // }
 //
 // #cgo noescape glowEnableVertexAttribArray
@@ -559,8 +573,10 @@ type defaultContext struct {
 	gpDisable                  C.uintptr_t
 	gpDisableVertexAttribArray C.uintptr_t
 	gpDrawElements             C.uintptr_t
+	gpCullFace                 C.uintptr_t
 	gpEnable                   C.uintptr_t
 	gpEnableVertexAttribArray  C.uintptr_t
+	gpFrontFace                C.uintptr_t
 	gpFlush                    C.uintptr_t
 	gpFramebufferRenderbuffer  C.uintptr_t
 	gpFramebufferTexture2D     C.uintptr_t
@@ -774,6 +790,10 @@ func (c *defaultContext) DrawElements(mode uint32, count int32, xtype uint32, of
 	C.glowDrawElements(c.gpDrawElements, C.GLenum(mode), C.GLsizei(count), C.GLenum(xtype), C.uintptr_t(offset))
 }
 
+func (c *defaultContext) CullFace(mode uint32) {
+	C.glowCullFace(c.gpCullFace, C.GLenum(mode))
+}
+
 func (c *defaultContext) Enable(cap uint32) {
 	C.glowEnable(c.gpEnable, C.GLenum(cap))
 }
@@ -784,6 +804,10 @@ func (c *defaultContext) EnableVertexAttribArray(index uint32) {
 
 func (c *defaultContext) Flush() {
 	C.glowFlush(c.gpFlush)
+}
+
+func (c *defaultContext) FrontFace(dir uint32) {
+	C.glowFrontFace(c.gpFrontFace, C.GLenum(dir))
 }
 
 func (c *defaultContext) FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32) {
@@ -1007,8 +1031,10 @@ func (c *defaultContext) LoadFunctions() error {
 	c.gpDisable = C.uintptr_t(g.get("glDisable"))
 	c.gpDisableVertexAttribArray = C.uintptr_t(g.get("glDisableVertexAttribArray"))
 	c.gpDrawElements = C.uintptr_t(g.get("glDrawElements"))
+	c.gpCullFace = C.uintptr_t(g.get("glCullFace"))
 	c.gpEnable = C.uintptr_t(g.get("glEnable"))
 	c.gpEnableVertexAttribArray = C.uintptr_t(g.get("glEnableVertexAttribArray"))
+	c.gpFrontFace = C.uintptr_t(g.get("glFrontFace"))
 	c.gpFlush = C.uintptr_t(g.get("glFlush"))
 	c.gpFramebufferRenderbuffer = C.uintptr_t(g.get("glFramebufferRenderbuffer"))
 	c.gpFramebufferTexture2D = C.uintptr_t(g.get("glFramebufferTexture2D"))

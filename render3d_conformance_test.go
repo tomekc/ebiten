@@ -176,9 +176,6 @@ func TestRender3D_ZRange(t *testing.T) {
 // TestRender3D_Winding: triangles wound clockwise in NDC (y up) are front
 // faces and render; the reverse winding is a back face and is culled.
 func TestRender3D_Winding(t *testing.T) {
-	if lib := conf3DGraphicsLibrary(); lib == ebiten.GraphicsLibraryOpenGL {
-		t.Skip("OpenGL 3D path does not cull yet (fork task A3)")
-	}
 	s := conf3DShader(t)
 	dst := newConf3DTarget(64, 64)
 

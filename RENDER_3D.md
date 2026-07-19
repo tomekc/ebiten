@@ -175,7 +175,10 @@ OpenGL / WebGL:
   y is flipped so NDC +y is the image top (matching Metal/DirectX), and the
   canonical clip z in `[0, w]` is remapped to OpenGL's `[-w, +w]`. The
   uniform is driver-owned and 0 for 2D draws (identity).
-* Back-face culling is not currently enabled in the OpenGL 3D path.
+* Enables back-face culling for 3D draws with `glFrontFace(GL_CCW)`: the
+  y-flip epilogue inverts the rasterized winding, so contract-front
+  triangles (clockwise in y-up NDC) arrive counterclockwise in window
+  coordinates. Culling is disabled again after the 3D draw.
 
 DirectX:
 
@@ -237,9 +240,11 @@ If lighting rotates with the mesh:
 
 If the wrong side of a mesh is visible or culled:
 
-* Check triangle winding. The mesh example emits clockwise front faces for the current Metal culling setup.
-* Remember that OpenGL currently does not enable culling in 3D mode, so culling bugs might only appear on Metal.
-* Keep winding and cull mode consistent when adding OpenGL or DirectX culling.
+* Check triangle winding: front faces wind clockwise as seen in y-up NDC
+  (the canonical contract; the mesh example and
+  `render3d_conformance_test.go`'s `conf3DTri` both emit it).
+* Metal, DirectX, and OpenGL all cull back faces in 3D mode; run
+  `TestRender3D_Winding` per backend when changing winding or cull state.
 
 ## Verification
 

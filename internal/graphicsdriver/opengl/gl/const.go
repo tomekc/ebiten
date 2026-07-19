@@ -21,11 +21,14 @@ const (
 	ARRAY_BUFFER          = 0x8892
 	BACK                  = 0x0405
 	BLEND                 = 0x0BE2
+	CCW                   = 0x0901
 	COLOR_BUFFER_BIT      = 0x00004000
 	CLAMP_TO_EDGE         = 0x812F
 	COLOR_ATTACHMENT0     = 0x8CE0
 	COMPLETION_STATUS_KHR = 0x91B1
 	COMPILE_STATUS        = 0x8B81
+	CULL_FACE             = 0x0B44
+	CW                    = 0x0900
 	DECR_WRAP             = 0x8508
 	DEPTH_ATTACHMENT      = 0x8D00
 	DEPTH24_STENCIL8      = 0x88F0

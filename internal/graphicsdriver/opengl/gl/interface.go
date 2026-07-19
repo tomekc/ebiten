@@ -46,6 +46,7 @@ type Context interface {
 	CreateBuffer() uint32
 	CreateFramebuffer() uint32
 	CreateProgram() uint32
+	CullFace(mode uint32)
 	CreateRenderbuffer() uint32
 	CreateShader(xtype uint32) uint32
 	CreateTexture() uint32
@@ -63,6 +64,7 @@ type Context interface {
 	Enable(cap uint32)
 	EnableVertexAttribArray(index uint32)
 	Flush()
+	FrontFace(dir uint32)
 	FramebufferRenderbuffer(target uint32, attachment uint32, renderbuffertarget uint32, renderbuffer uint32)
 	FramebufferTexture2D(target uint32, attachment uint32, textarget uint32, texture uint32, level int32)
 	GetError() uint32

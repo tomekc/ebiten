@@ -310,6 +310,15 @@ func (g *Graphics) DrawTrianglesWithMode(dstID graphicsdriver.ImageID, srcIDs [g
 		g.context.ctx.Enable(gl.DEPTH_TEST)
 		defer g.context.ctx.Disable(gl.DEPTH_TEST)
 
+		// Contract winding: clockwise in y-up NDC = front face (see
+		// RENDER_3D.md). The 3D canonicalization epilogue flips y on
+		// OpenGL, which inverts the rasterized winding, so contract-front
+		// triangles arrive counterclockwise in window coordinates.
+		g.context.ctx.Enable(gl.CULL_FACE)
+		g.context.ctx.CullFace(gl.BACK)
+		g.context.ctx.FrontFace(gl.CCW)
+		defer g.context.ctx.Disable(gl.CULL_FACE)
+
 		if destination.needs3DClear(g.frame) {
 			w, h := destination.viewportSizeForMode(drawMode)
 			g.context.ctx.Scissor(0, 0, int32(w), int32(h))
