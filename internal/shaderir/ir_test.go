@@ -972,10 +972,21 @@ in vec2 A2;
 out float V0;
 out vec2 V1;
 
-void main(void) {
+uniform float ebiten_3d_adjust;
+
+void ebiten_vertex_main(void) {
 	gl_Position = A0;
 	V0 = A1;
 	V1 = A2;
+}
+
+void main(void) {
+	ebiten_vertex_main();
+	// 3D mode: flip y to match the cross-backend orientation
+	// contract (NDC +y = image top) and remap the canonical clip
+	// z in [0,w] to OpenGL's [-w,w].
+	gl_Position.y = mix(gl_Position.y, -gl_Position.y, ebiten_3d_adjust);
+	gl_Position.z = mix(gl_Position.z, 2.0 * gl_Position.z - gl_Position.w, ebiten_3d_adjust);
 }`,
 			GlslFS: glslFragmentPrelude + `
 uniform float U0;
@@ -1050,10 +1061,21 @@ in vec2 A2;
 out float V0;
 out vec2 V1;
 
-void main(void) {
+uniform float ebiten_3d_adjust;
+
+void ebiten_vertex_main(void) {
 	gl_Position = A0;
 	V0 = A1;
 	V1 = A2;
+}
+
+void main(void) {
+	ebiten_vertex_main();
+	// 3D mode: flip y to match the cross-backend orientation
+	// contract (NDC +y = image top) and remap the canonical clip
+	// z in [0,w] to OpenGL's [-w,w].
+	gl_Position.y = mix(gl_Position.y, -gl_Position.y, ebiten_3d_adjust);
+	gl_Position.z = mix(gl_Position.z, 2.0 * gl_Position.z - gl_Position.w, ebiten_3d_adjust);
 }`,
 			GlslFS: glslFragmentPrelude + `
 uniform float U0;

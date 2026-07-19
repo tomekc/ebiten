@@ -57,7 +57,9 @@ func perspective(fovY, aspect, near, far float32) mat4 {
 	// fovy = (fovy * math.Pi) / 180.0 // convert from degrees to radians
 	nmf, f := near-far, float32(1./math.Tan(float64(fovY)/2.0))
 
-	return mat4{float32(f / aspect), 0, 0, 0, 0, float32(f), 0, 0, 0, 0, float32((near + far) / nmf), -1, 0, 0, float32((2. * far * near) / nmf), 0}
+	// The 3D mode's canonical clip volume has z in [0, w] (see
+	// RENDER_3D.md): near maps to NDC z 0 and far to 1 on every backend.
+	return mat4{float32(f / aspect), 0, 0, 0, 0, float32(f), 0, 0, 0, 0, float32(far / nmf), -1, 0, 0, float32((far * near) / nmf), 0}
 }
 
 func normalize(v vec3) vec3 {

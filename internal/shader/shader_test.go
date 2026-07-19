@@ -32,6 +32,16 @@ import (
 func glslVertexNormalize(str string) string {
 	p := glsl.VertexPrelude(glsl.GLSLVersionDefault)
 	str = strings.TrimPrefix(str, p)
+	// The compiler wraps the user vertex entry point so that the 3D-mode
+	// canonicalization epilogue always runs (see glsl.Compile). Strip that
+	// fixed boilerplate so the golden files keep expressing only the
+	// user-derived output. The exact wrapper structure is snapshotted in
+	// internal/shaderir's ir_test.go instead.
+	str = strings.Replace(str, "uniform float ebiten_3d_adjust;\n\n", "", 1)
+	str = strings.Replace(str, "void ebiten_vertex_main(void) {", "void main(void) {", 1)
+	if idx := strings.Index(str, "\nvoid main(void) {\n\tebiten_vertex_main();"); idx >= 0 {
+		str = str[:idx]
+	}
 	return strings.TrimSpace(str)
 }
 

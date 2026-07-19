@@ -120,9 +120,6 @@ func TestRender3D_DepthOrdering(t *testing.T) {
 // must land at the TOP-left of the destination image. The assertion defines
 // the contract: NDC +y = image top.
 func TestRender3D_Orientation(t *testing.T) {
-	if lib := conf3DGraphicsLibrary(); lib == ebiten.GraphicsLibraryOpenGL {
-		t.Skip("OpenGL 3D path renders y-flipped (fork task A2)")
-	}
 	s := conf3DShader(t)
 	dst := newConf3DTarget(64, 64)
 

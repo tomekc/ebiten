@@ -85,6 +85,30 @@ The default mesh camera is placed at `(0, 0, 5)` and looks at the origin, so it 
 
 Matrices in `examples/mesh/math3d.go` are column-major. Matrix multiplication is written for column vectors, so transforms compose as `projection * view * model`.
 
+### Canonical clip-space contract (all backends)
+
+Vertex shaders for 3D draws must emit clip-space positions with:
+
+* `x` right, `y` up: post-divide NDC `(+1, +1)` is the TOP-right of the
+  destination image on every backend.
+* `z` in `[0, w]`: near maps to NDC z `0`, far to `1` (Direct3D/Metal style).
+  Geometry with clip z outside `[0, w]` is clipped on every backend —
+  including OpenGL, whose native `[-w, +w]` volume is remapped internally.
+* Winding: triangles that wind clockwise as seen in y-up NDC are front
+  faces; back faces are culled (Metal/DirectX today; OpenGL after the
+  culling-parity task).
+
+Backends adapt internally so callers never branch per platform. On
+OpenGL/WebGL the shader compiler wraps the user vertex entry point and
+applies a driver-controlled epilogue (`ebiten_3d_adjust`) that flips y and
+remaps z for `DrawMode3D` draws only; 2D draws are untouched. Use a
+projection matrix that emits z in `[0, w]`, like `examples/mesh`'s
+`perspective` (`zz = far/(near-far)`, `zw = far*near/(near-far)`).
+
+`render3d_conformance_test.go` is the executable form of this contract; run
+it per backend with `go test -run TestRender3D .` and
+`EBITENGINE_GRAPHICS_LIBRARY=opengl go test -run TestRender3D .`.
+
 ## How 3D Is Hooked Into Ebitengine
 
 The public API entry point is:
@@ -147,6 +171,10 @@ OpenGL / WebGL:
 * Clears color and depth once per frame for each 3D target.
 * Uses logical image size for the 3D viewport.
 * WebGL requests a context with `depth: true` and `stencil: true`.
+* Canonicalizes 3D draws via the `ebiten_3d_adjust` vertex-shader epilogue:
+  y is flipped so NDC +y is the image top (matching Metal/DirectX), and the
+  canonical clip z in `[0, w]` is remapped to OpenGL's `[-w, +w]`. The
+  uniform is driver-owned and 0 for 2D draws (identity).
 * Back-face culling is not currently enabled in the OpenGL 3D path.
 
 DirectX:

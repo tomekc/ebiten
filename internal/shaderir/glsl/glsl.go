@@ -205,11 +205,28 @@ func Compile(p *shaderir.Program, version GLSLVersion) (vertexShader, fragmentSh
 				vslines = append(vslines, touchUniformsFunc...)
 			}
 			vslines = append(vslines, "")
-			vslines = append(vslines, "void main(void) {")
+			// ebiten_3d_adjust canonicalizes 3D-mode (DrawMode3D) draws on
+			// OpenGL: the driver sets it to 1 for 3D draws and 0 for regular
+			// 2D draws (identity). The user's vertex entry point runs in a
+			// helper function so that its return statements cannot skip the
+			// epilogue; gl_Position and the varyings are globals, so the
+			// split is behavior-preserving.
+			vslines = append(vslines, "uniform float ebiten_3d_adjust;")
+			vslines = append(vslines, "")
+			vslines = append(vslines, "void ebiten_vertex_main(void) {")
 			if len(touchUniformsFunc) > 0 {
 				vslines = append(vslines, "\ttouchUniforms();")
 			}
 			vslines = append(vslines, c.block(p, p.VertexFunc.Block, p.VertexFunc.Block, 0)...)
+			vslines = append(vslines, "}")
+			vslines = append(vslines, "")
+			vslines = append(vslines, "void main(void) {")
+			vslines = append(vslines, "\tebiten_vertex_main();")
+			vslines = append(vslines, "\t// 3D mode: flip y to match the cross-backend orientation")
+			vslines = append(vslines, "\t// contract (NDC +y = image top) and remap the canonical clip")
+			vslines = append(vslines, "\t// z in [0,w] to OpenGL's [-w,w].")
+			vslines = append(vslines, "\tgl_Position.y = mix(gl_Position.y, -gl_Position.y, ebiten_3d_adjust);")
+			vslines = append(vslines, "\tgl_Position.z = mix(gl_Position.z, 2.0 * gl_Position.z - gl_Position.w, ebiten_3d_adjust);")
 			vslines = append(vslines, "}")
 		}
 	}

@@ -18,6 +18,7 @@ package opengl
 
 import (
 	"fmt"
+	"math"
 	"unsafe"
 
 	"github.com/hajimehoshi/ebiten/v2/internal/graphics"
@@ -30,6 +31,15 @@ type activatedTexture struct {
 	textureNative textureNative
 	index         int
 }
+
+// Values for the ebiten_3d_adjust vertex-shader uniform (see the GLSL
+// compiler). Kept in two distinct immutable arrays so the uniform cache's
+// change detection (which compares slice contents) works across draws that
+// alternate between 2D and 3D modes.
+var (
+	adjust3DOff = [1]uint32{0}
+	adjust3DOn  = [1]uint32{math.Float32bits(1)}
+)
 
 var (
 	_ graphicsdriver.DepthTextureAttacher  = (*Graphics)(nil)
@@ -244,6 +254,22 @@ func (g *Graphics) DrawTrianglesWithMode(dstID graphicsdriver.ImageID, srcIDs [g
 		g.uniformVars[i].typ = typ
 		idx += n
 	}
+
+	// ebiten_3d_adjust drives the vertex-shader epilogue that canonicalizes
+	// 3D draws (DrawMode3D) on OpenGL: y is flipped to match the
+	// cross-backend orientation contract (NDC +y = image top), and the
+	// canonical clip z in [0, w] is remapped to OpenGL's [-w, w]. Regular 2D
+	// draws pass 0 (identity). The two distinct backing arrays keep the
+	// uniform cache's change detection working.
+	adjust := adjust3DOff[:]
+	if drawMode == graphicsdriver.DrawMode3D {
+		adjust = adjust3DOn[:]
+	}
+	g.uniformVars = append(g.uniformVars, uniformVariable{
+		name:  "ebiten_3d_adjust",
+		value: adjust,
+		typ:   shaderir.Type{Main: shaderir.Float},
+	})
 
 	// In OpenGL, the NDC's Y direction is upward, so flip the Y direction for the final framebuffer.
 	if destination.screen {
